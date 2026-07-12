@@ -51,17 +51,36 @@ docker compose up -d --build
 1. 准备 MySQL 8 与 Redis 7，创建数据库并执行：
    - `src/main/resources/db/schema.sql`
    - `src/main/resources/db/data.sql`
-2. 通过环境变量或修改 `application.yml` 配置数据源、Redis、JWT 密钥。
+2. 通过环境变量选择配置环境，并配置数据源、Redis、JWT 密钥。
 3. 启动：
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
+## 配置环境
+
+`application.yml` 只保留公共配置，并通过 `SPRING_PROFILES_ACTIVE` 选择具体环境，默认使用 `dev`：
+
+| 环境 | 配置文件 | 说明 |
+|------|----------|------|
+| `dev` | `application-dev.yml` | 本地开发，默认连接本机 MySQL / Redis |
+| `test` | `application-test.yml` | 自动化测试使用，测试类默认激活 |
+| `prod` | `application-prod.yml` | 生产/容器部署，数据库、Redis、JWT、CORS 等必须通过环境变量提供 |
+
+这三份 profile 文件按本地环境维护，已加入 `.gitignore`，不会上传到仓库。
+
+示例：
+
+```bash
+SPRING_PROFILES_ACTIVE=prod ./mvnw spring-boot:run
+```
+
 ## 主要环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `SPRING_PROFILES_ACTIVE` | 配置环境 | dev（Docker Compose 默认 prod） |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` | 数据库连接 | localhost / 3306 / d_game |
 | `DB_USER` / `DB_PASSWORD` | 数据库账号 | root / 空 |
 | `REDIS_HOST` / `REDIS_PORT` | Redis 连接 | localhost / 6379 |

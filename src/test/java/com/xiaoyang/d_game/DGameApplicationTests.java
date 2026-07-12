@@ -1,9 +1,11 @@
 package com.xiaoyang.d_game;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest(properties = "jwt.secret=test-secret-that-is-long-enough-for-hs256")
+@ActiveProfiles("test")
+@SpringBootTest
 class DGameApplicationTests {
 
 	@Test
