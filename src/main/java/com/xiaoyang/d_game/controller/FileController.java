@@ -13,6 +13,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+/**
+ * 文件上传接口。
+ *
+ * <p>当前主要用于图片上传。上传需要登录，服务层会校验类型、保存文件、写入文件记录，并返回可访问 URL。</p>
+ */
 @Tag(name = "文件")
 @RestController
 @RequestMapping("/api/v1/files")
@@ -21,6 +26,11 @@ public class FileController {
 
     private final FileService fileService;
 
+    /**
+     * 上传单个图片文件。
+     *
+     * <p>表单字段名必须为 {@code file}，前端应使用 multipart/form-data。</p>
+     */
     @RequireLogin
     @Operation(summary = "上传图片")
     @PostMapping("/upload")

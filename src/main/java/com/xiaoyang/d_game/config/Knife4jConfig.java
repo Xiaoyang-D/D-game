@@ -9,8 +9,19 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+/**
+ * OpenAPI/Knife4j 接口文档配置。
+ *
+ * <p>这里声明 API 标题、版本和 JWT Bearer 鉴权方案，让开发者可以在文档页面直接填入
+ * {@code Authorization: Bearer <token>} 调试需要登录的接口。</p>
+ */
 public class Knife4jConfig {
 
+    /**
+     * 构建 OpenAPI 描述对象。
+     *
+     * @return OpenAPI 元信息和安全方案配置
+     */
     @Bean
     public OpenAPI openAPI() {
         return new OpenAPI()

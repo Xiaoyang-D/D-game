@@ -12,6 +12,12 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class JacksonConfig {
 
+    /**
+     * 自定义 Jackson 序列化规则。
+     *
+     * <p>只追加 Long/long 类型转字符串的规则，不替换 Spring Boot 默认配置，
+     * 这样 LocalDateTime、LocalDate 等 Java Time 类型仍然按框架默认模块处理。</p>
+     */
     @Bean
     public Jackson2ObjectMapperBuilderCustomizer longToStringCustomizer() {
         return builder -> {

@@ -1,0 +1,53 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:d_game_test}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:4}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        auto-startup: ${RABBITMQ_LISTENER_AUTO_STARTUP:false}
+
+jwt:
+  secret: ${JWT_SECRET:test-secret-that-is-long-enough-for-hs256}
+  access-expire-ms: ${JWT_ACCESS_EXPIRE_MS:7200000}
+  refresh-expire-ms: ${JWT_REFRESH_EXPIRE_MS:604800000}
+  cookie-secure: false
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+file:
+  upload-dir: ${FILE_UPLOAD_DIR:./target/test-uploads}
+  base-url: ${FILE_BASE_URL:http://localhost:8080/files}
+
+dgame:
+  rabbitmq:
+    notification:
+      listener:
+        concurrency: ${NOTIFICATION_LISTENER_CONCURRENCY:1}
+        max-concurrency: ${NOTIFICATION_LISTENER_MAX_CONCURRENCY:1}
+        prefetch: ${NOTIFICATION_LISTENER_PREFETCH:1}
+      executor:
+        core-size: ${NOTIFICATION_EXECUTOR_CORE_SIZE:1}
+        max-size: ${NOTIFICATION_EXECUTOR_MAX_SIZE:1}
+        queue-capacity: ${NOTIFICATION_EXECUTOR_QUEUE_CAPACITY:20}
+
+logging:
+  level:
+    com.xiaoyang.d_game: debug

@@ -5,5 +5,8 @@ import com.xiaoyang.d_game.entity.UserFavorite;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
+/**
+ * 用户收藏 Mapper。
+ */
 public interface UserFavoriteMapper extends BaseMapper<UserFavorite> {
 }
