@@ -41,6 +41,12 @@ import java.util.Objects;
 @Service
 @Slf4j
 @RequiredArgsConstructor
+/**
+ * 帖子业务实现。
+ *
+ * <p>负责公开列表、排行榜、关注流、详情浏览、发帖和后台审核辅助查询。
+ * 帖子内容会在入库和返回时都经过 HTML 清洗，兼顾新增内容和历史存量内容的安全。</p>
+ */
 public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements PostService {
 
     private final BoardMapper boardMapper;
@@ -50,6 +56,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     private final HtmlSanitizer htmlSanitizer;
 
     @Override
+    /**
+     * 分页查询公开帖子。
+     *
+     * <p>只查询审核通过的帖子，避免待审核或被拒绝内容出现在公共列表。</p>
+     */
     public PageResult<PostResp> pagePosts(PostQueryReq req) {
         log.debug("分页查询帖子, boardId={}, gameId={}, keyword={}, page={}, size={}",
                 req.getBoardId(), req.getGameId(), req.getKeyword(), req.getPage(), req.getSize());
@@ -77,6 +88,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     @Override
+    /**
+     * 查询帖子排行榜。
+     *
+     * <p>latest 按发布时间排序，hot 使用浏览、点赞、评论、收藏的加权分数排序。</p>
+     */
     public PageResult<PostResp> pageRanking(PostRankingQueryReq req) {
         PostRankingTypeEnum rankingType = PostRankingTypeEnum.fromCode(req.getType());
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
@@ -97,6 +113,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     @Override
+    /**
+     * 查询待审核帖子。
+     */
     public PageResult<PostResp> pagePendingPosts(Long page, Long size) {
         Page<Post> result = page(new Page<>(page, size), new LambdaQueryWrapper<Post>()
                 .eq(Post::getStatus, ContentStatusEnum.PENDING.getCode())
@@ -110,6 +129,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     @Override
+    /**
+     * 查询封禁作者发布过的帖子。
+     *
+     * <p>先筛出封禁用户 ID，再按这些用户 ID 查询帖子；没有匹配用户时直接返回空分页。</p>
+     */
     public PageResult<PostResp> pagePostsByBannedAuthors(BannedAuthorPostQueryReq req) {
         LambdaQueryWrapper<User> userWrapper = new LambdaQueryWrapper<>();
         userWrapper.eq(User::getStatus, UserStatusEnum.BANNED.getCode());
@@ -139,6 +163,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     @Override
+    /**
+     * 查询当前用户自己的帖子。
+     */
     public PageResult<PostResp> pageMyPosts(Long page, Long size) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -156,6 +183,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     @Override
+    /**
+     * 查询关注用户的公开帖子。
+     */
     public PageResult<PostResp> pageFollowingPosts(Long page, Long size) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -165,6 +195,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
                         .eq(UserFollow::getFollowerId, userId))
                 .stream().map(UserFollow::getFolloweeId).toList();
         if (followeeIds.isEmpty()) {
+            // 没有关注任何人时直接返回空页，避免生成空 in 条件 SQL。
             return emptyPageResult(page, size);
         }
         Page<Post> result = page(new Page<>(page, size), new LambdaQueryWrapper<Post>()
@@ -181,6 +212,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 查询帖子详情并增加浏览数。
+     *
+     * <p>非公开状态的帖子只有作者本人和管理员可见；浏览数使用 SQL 原子自增，减少并发覆盖。</p>
+     */
     public PostResp getPostDetail(Long postId) {
         log.debug("查询帖子详情, postId={}", postId);
         Post post = getById(postId);
@@ -192,10 +228,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
             UserContext context = UserContext.get();
             boolean isAuthor = currentUserId != null && Objects.equals(currentUserId, post.getUserId());
             boolean isAdmin = context != null && context.hasRole("ADMIN");
+            // 未通过审核的内容不对外公开，避免普通用户绕过列表直接访问详情。
             if (!isAuthor && !isAdmin) {
                 throw new BizException(ResultCode.FORBIDDEN, "帖子未通过审核");
             }
         }
+        // 数据库原子自增真实浏览数，再同步内存对象，保证返回值也是最新浏览数。
         getBaseMapper().update(null, new LambdaUpdateWrapper<Post>()
                 .eq(Post::getId, postId)
                 .setSql("view_count = view_count + 1"));
@@ -206,6 +244,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 创建帖子。
+     *
+     * <p>新帖默认进入待审核状态，正文先经过富文本清洗再入库。</p>
+     */
     public String createPost(PostCreateReq req) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -220,6 +263,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
+        // 帖子不直接公开，避免垃圾内容绕过审核进入社区首页。
         Post post = new Post();
         post.setBoardId(req.getBoardId());
         post.setGameId(req.getGameId());
@@ -232,6 +276,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         return String.valueOf(post.getId());
     }
 
+    /**
+     * 将帖子实体转换为前端响应。
+     *
+     * <p>这里会补充版块名、游戏名、作者信息，并再次清洗正文，兼容引入清洗逻辑前保存的历史内容。</p>
+     */
     private PostResp toPostResp(Post post) {
         PostResp resp = new PostResp();
         resp.setId(post.getId());
@@ -239,7 +288,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         resp.setGameId(post.getGameId());
         resp.setUserId(post.getUserId());
         resp.setTitle(post.getTitle());
-        // Also sanitize legacy records that were saved before sanitization was introduced.
+        // 对引入清洗逻辑前保存的历史帖子也再次清洗，避免旧数据直接回显产生 XSS 风险。
         resp.setContent(htmlSanitizer.sanitizePostContent(post.getContent()));
         resp.setStatus(post.getStatus());
         resp.setViewCount(post.getViewCount());
@@ -263,6 +312,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         return resp;
     }
 
+    /**
+     * 构造空分页响应。
+     */
     private PageResult<PostResp> emptyPageResult(Long page, Long size) {
         PageResult<PostResp> pageResult = new PageResult<>();
         pageResult.setPage(page);

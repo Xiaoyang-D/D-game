@@ -43,6 +43,12 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+/**
+ * 游戏库业务实现。
+ *
+ * <p>负责游戏查询、排行榜、详情、创建和评分。为了减少前端请求次数，列表和详情响应会批量补充分类名称和标签名称；
+ * 用户评分后会立即回算游戏平均分和评分人数。</p>
+ */
 public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements GameService {
 
     private final GameCategoryMapper gameCategoryMapper;
@@ -52,6 +58,11 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
     private final UserMapper userMapper;
 
     @Override
+    /**
+     * 分页查询游戏列表。
+     *
+     * <p>支持分类、关键字和标签筛选。标签筛选使用 EXISTS 子查询，避免把关联表 join 后影响分页记录数。</p>
+     */
     public PageResult<GameResp> pageGames(GameQueryReq req) {
         LambdaQueryWrapper<Game> wrapper = new LambdaQueryWrapper<>();
         if (req.getCategoryId() != null) {
@@ -76,6 +87,11 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
     }
 
     @Override
+    /**
+     * 游戏排行榜。
+     *
+     * <p>popular 偏向评分人数，rating 偏向平均分；两个排序都会使用另一个指标做次级排序，让结果更稳定。</p>
+     */
     public PageResult<GameResp> pageRanking(GameRankingQueryReq req) {
         GameRankingTypeEnum rankingType = GameRankingTypeEnum.fromCode(req.getType());
         LambdaQueryWrapper<Game> wrapper = new LambdaQueryWrapper<>();
@@ -97,6 +113,9 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
     }
 
     @Override
+    /**
+     * 查询游戏详情。
+     */
     public GameResp getGameDetail(Long gameId) {
         Game game = getBaseMapper().selectByIdForUpdate(gameId);
         if (game == null) {
@@ -107,6 +126,11 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 创建游戏。
+     *
+     * <p>事务覆盖游戏主表和游戏-标签关系表，保证标签关联不会出现只插入一半的情况。</p>
+     */
     public Long createGame(GameCreateReq req) {
         Game game = new Game();
         game.setName(req.getName());
@@ -117,6 +141,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         game.setReleaseDate(req.getReleaseDate());
         save(game);
         if (req.getTagIds() != null && !req.getTagIds().isEmpty()) {
+            // 当前接口信任前端传入的 tagId 已存在；如果后续开放给非管理员，应增加标签存在性校验。
             for (Long tagId : req.getTagIds()) {
                 GameTagRel rel = new GameTagRel();
                 rel.setGameId(game.getId());
@@ -129,6 +154,11 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 新增或更新当前用户对游戏的评分。
+     *
+     * <p>同一用户对同一游戏只能有一条评分记录；重复评分会覆盖原评分，并在事务内回算游戏汇总评分。</p>
+     */
     public void rateGame(Long gameId, GameRatingReq req) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -143,6 +173,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
                 .eq(GameRating::getGameId, gameId)
                 .last("LIMIT 1"));
         if (existing == null) {
+            // 首次评分：插入一条用户-游戏评分记录。
             GameRating rating = new GameRating();
             rating.setUserId(userId);
             rating.setGameId(gameId);
@@ -150,6 +181,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
             applyReviewFields(rating, req);
             gameRatingMapper.insert(rating);
         } else {
+            // 再次评分：更新原记录，避免一个用户重复拉高评分人数。
             existing.setScore(req.getScore());
             applyReviewFields(existing, req);
             gameRatingMapper.updateById(existing);
@@ -158,6 +190,9 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
     }
 
     @Override
+    /**
+     * 分页查询游戏评测。
+     */
     public PageResult<GameReviewResp> pageGameReviews(Long gameId, Long page, Long size) {
         if (getById(gameId) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
@@ -175,16 +210,27 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
     }
 
     @Override
+    /**
+     * 查询游戏分类，按排序字段升序。
+     */
     public List<GameCategory> listCategories() {
         return gameCategoryMapper.selectList(new LambdaQueryWrapper<GameCategory>()
                 .orderByAsc(GameCategory::getSortOrder));
     }
 
     @Override
+    /**
+     * 查询全部标签。
+     */
     public List<Tag> listTags() {
         return tagMapper.selectList(null);
     }
 
+    /**
+     * 回算游戏平均分和评分人数。
+     *
+     * <p>评分详情表是事实来源，游戏表中的 avgRating/ratingCount 是冗余汇总字段，方便列表排序和展示。</p>
+     */
     private void refreshGameRating(Game game) {
         Map<String, Object> summary = gameRatingMapper.selectRatingSummary(game.getId());
         Number average = (Number) summary.get("avgRating");
@@ -195,6 +241,9 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         updateById(game);
     }
 
+    /**
+     * 复制评分附加字段，并统一做空字符串处理。
+     */
     private void applyReviewFields(GameRating rating, GameRatingReq req) {
         rating.setSummary(normalizeText(req.getSummary()));
         rating.setPros(normalizeText(req.getPros()));
@@ -202,10 +251,16 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         rating.setPlaytimeHours(req.getPlaytimeHours());
     }
 
+    /**
+     * 将可选文本标准化为非 null 字符串。
+     */
     private String normalizeText(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
     }
 
+    /**
+     * 将评分实体转换成评测响应，并补充用户昵称。
+     */
     private GameReviewResp toReviewResp(GameRating rating) {
         GameReviewResp resp = new GameReviewResp();
         resp.setId(rating.getId());
@@ -221,18 +276,28 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         return resp;
     }
 
+    /**
+     * 单个游戏实体转换响应对象。
+     */
     private GameResp toGameResp(Game game) {
         return toGameResps(List.of(game)).getFirst();
     }
 
+    /**
+     * 批量转换游戏响应。
+     *
+     * <p>这里批量查询分类和标签，避免列表中每个游戏单独查一次导致 N+1 查询。</p>
+     */
     private List<GameResp> toGameResps(List<Game> games) {
         if (games.isEmpty()) {
             return Collections.emptyList();
         }
         List<Long> gameIds = games.stream().map(Game::getId).toList();
+        // 批量加载分类名称，按 categoryId 做内存映射。
         Map<Long, String> categoryNames = gameCategoryMapper.selectBatchIds(
                         games.stream().map(Game::getCategoryId).distinct().toList())
                 .stream().collect(Collectors.toMap(GameCategory::getId, GameCategory::getName));
+        // 批量加载游戏-标签关系，再批量查询标签名称。
         Map<Long, List<Long>> tagIdsByGame = new HashMap<>();
         List<GameTagRel> relations = gameTagRelMapper.selectList(new LambdaQueryWrapper<GameTagRel>()
                 .in(GameTagRel::getGameId, gameIds));
@@ -245,6 +310,9 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         return games.stream().map(game -> toGameResp(game, categoryNames, tagIdsByGame, tagNames)).toList();
     }
 
+    /**
+     * 使用已批量加载的分类/标签数据组装单个游戏响应。
+     */
     private GameResp toGameResp(Game game, Map<Long, String> categoryNames,
                                 Map<Long, List<Long>> tagIdsByGame, Map<Long, String> tagNames) {
         GameResp resp = new GameResp();

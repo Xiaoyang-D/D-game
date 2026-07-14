@@ -18,12 +18,21 @@ import java.time.LocalDate;
 @Service
 @Slf4j
 @RequiredArgsConstructor
+/**
+ * 每日签到业务实现。
+ *
+ * <p>签到状态由 Redis Bitmap 保存，成长奖励由 {@link GrowthService} 发放。
+ * 这里负责把“当前登录用户 + 今天”转换为具体签到流程。</p>
+ */
 public class CheckInServiceImpl implements CheckInService {
 
     private final CheckInBitmapRepository checkInBitmapRepository;
     private final GrowthService growthService;
 
     @Override
+    /**
+     * 查询签到状态。
+     */
     public CheckInStatusResp getStatus() {
         Long userId = currentUserId();
         LocalDate today = CheckInBitmapRepository.today();
@@ -32,6 +41,7 @@ public class CheckInServiceImpl implements CheckInService {
 
         CheckInStatusResp resp = new CheckInStatusResp();
         resp.setCheckedInToday(checkedInToday);
+        // 如果今天还没签到，连续天数应从昨天开始算；否则从今天开始算。
         resp.setStreakDays(checkInBitmapRepository.calcStreak(userId,
                 checkedInToday ? today : today.minusDays(1)));
         resp.setLastCheckInDate(checkInBitmapRepository.findLastCheckInDate(userId, today));
@@ -41,12 +51,18 @@ public class CheckInServiceImpl implements CheckInService {
     }
 
     @Override
+    /**
+     * 执行今日签到。
+     *
+     * <p>markCheckedIn 会利用 Redis setBit 的旧值判断重复签到；成功后再计算连续天数并发奖励。</p>
+     */
     public CheckInResultResp checkIn() {
         Long userId = currentUserId();
         LocalDate today = CheckInBitmapRepository.today();
         log.debug("开始每日签到, userId={}, date={}", userId, today);
         checkInBitmapRepository.markCheckedIn(userId, today);
 
+        // 签到成功后再计算连续天数，此时今天已经被写入 Bitmap。
         int streakDays = checkInBitmapRepository.calcStreak(userId, today);
         CheckInRewardResp reward = growthService.onCheckInSuccess(userId, today, streakDays);
 
@@ -60,6 +76,9 @@ public class CheckInServiceImpl implements CheckInService {
         return resp;
     }
 
+    /**
+     * 获取当前登录用户 ID。
+     */
     private Long currentUserId() {
         Long userId = UserContext.getUserId();
         if (userId == null) {

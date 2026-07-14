@@ -27,12 +27,21 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+/**
+ * 用户业务实现。
+ *
+ * <p>负责用户基础查询、角色聚合、资料响应转换和个人资料更新。
+ * 敏感字段如密码哈希不会进入响应 DTO。</p>
+ */
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
     private final UserRoleRelMapper userRoleRelMapper;
     private final SysRoleMapper sysRoleMapper;
 
     @Override
+    /**
+     * 按用户名查询用户。
+     */
     public User getByUsername(String username) {
         return getOne(new LambdaQueryWrapper<User>()
                 .eq(User::getUsername, username)
@@ -40,6 +49,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    /**
+     * 查询必需用户。
+     */
     public User getRequiredUser(Long userId) {
         User user = getById(userId);
         if (user == null) {
@@ -49,6 +61,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    /**
+     * 查询用户角色编码。
+     *
+     * <p>先查用户-角色关系，再批量查角色表，避免角色表和关系表强耦合在调用方。</p>
+     */
     public List<String> listRoleCodes(Long userId) {
         List<UserRoleRel> relations = userRoleRelMapper.selectList(new LambdaQueryWrapper<UserRoleRel>()
                 .eq(UserRoleRel::getUserId, userId));
@@ -62,6 +79,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    /**
+     * 转换用户响应。
+     */
     public UserResp toUserResp(User user) {
         UserResp resp = new UserResp();
         resp.setId(user.getId());
@@ -78,6 +98,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    /**
+     * 获取当前用户资料。
+     */
     public UserResp getCurrentUserProfile() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -88,6 +111,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 更新当前用户资料。
+     *
+     * <p>可选字段采用“传了才更新”的策略；邮箱和手机号更新前会校验唯一性。</p>
+     */
     public UserResp updateProfile(UpdateProfileReq req) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
@@ -98,6 +126,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             user.setNickname(req.getNickname());
         }
         if (StringUtils.hasText(req.getEmail())) {
+            // 邮箱/手机号是唯一字段，排除当前用户后查重。
             checkEmailUnique(req.getEmail(), userId);
             user.setEmail(req.getEmail());
         }
@@ -115,6 +144,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return toUserResp(user);
     }
 
+    /**
+     * 校验邮箱未被其他用户使用。
+     */
     private void checkEmailUnique(String email, Long userId) {
         User exists = getOne(new LambdaQueryWrapper<User>()
                 .eq(User::getEmail, email)
@@ -125,6 +157,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
     }
 
+    /**
+     * 校验手机号未被其他用户使用。
+     */
     private void checkMobileUnique(String mobile, Long userId) {
         User exists = getOne(new LambdaQueryWrapper<User>()
                 .eq(User::getMobile, mobile)
@@ -136,6 +171,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    /**
+     * 校验用户状态。
+     */
     public void checkUserAvailable(User user) {
         if (user == null) {
             throw new BizException(ResultCode.USER_NOT_FOUND);

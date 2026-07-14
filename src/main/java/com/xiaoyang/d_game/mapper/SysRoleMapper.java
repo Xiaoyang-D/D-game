@@ -5,6 +5,9 @@ import com.xiaoyang.d_game.entity.SysRole;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
+/**
+ * 系统角色 Mapper。
+ */
 public interface SysRoleMapper extends BaseMapper<SysRole> {
 }
 

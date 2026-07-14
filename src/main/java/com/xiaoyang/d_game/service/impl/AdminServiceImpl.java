@@ -41,6 +41,12 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+/**
+ * 后台管理业务实现。
+ *
+ * <p>管理员动作通常会改变用户或内容状态，因此大多数写操作都带事务，并写入审计日志。
+ * 内容审核还会通过站内通知把结果反馈给作者。</p>
+ */
 public class AdminServiceImpl implements AdminService {
 
     private final UserMapper userMapper;
@@ -53,6 +59,9 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 封禁用户。
+     */
     public void banUser(Long userId) {
         User user = requireUser(userId);
         user.setStatus(UserStatusEnum.BANNED.getCode());
@@ -62,6 +71,9 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 解封用户。
+     */
     public void unbanUser(Long userId) {
         User user = requireUser(userId);
         user.setStatus(UserStatusEnum.NORMAL.getCode());
@@ -71,11 +83,17 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 审核帖子。
+     *
+     * <p>帖子状态、审计日志和通知发送在同一事务里完成；通知失败如果抛出运行时异常也会回滚审核结果。</p>
+     */
     public void auditPost(Long postId, AuditReq req) {
         Post post = postMapper.selectById(postId);
         if (post == null) {
             throw new BizException(ResultCode.POST_NOT_FOUND);
         }
+        // approved=true 表示审核通过，否则标记为拒绝。
         int status = req.getApproved() ? ContentStatusEnum.APPROVED.getCode() : ContentStatusEnum.REJECTED.getCode();
         post.setStatus(status);
         postMapper.updateById(post);
@@ -88,6 +106,9 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 管理员删除帖子。
+     */
     public void deletePost(Long postId) {
         Post post = postMapper.selectById(postId);
         if (post == null) {
@@ -99,6 +120,11 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 批量审核帖子。
+     *
+     * <p>为了避免某个非待审核帖子影响整批处理，遇到非待审核状态直接跳过；非法 ID 或不存在帖子仍会抛错。</p>
+     */
     public void batchAuditPosts(BatchAuditReq req) {
         for (String postIdStr : req.getPostIds()) {
             Long postId;
@@ -112,6 +138,7 @@ public class AdminServiceImpl implements AdminService {
                 throw new BizException(ResultCode.POST_NOT_FOUND, "帖子不存在: " + postIdStr);
             }
             if (!Objects.equals(post.getStatus(), ContentStatusEnum.PENDING.getCode())) {
+                // 只处理待审核内容，已经审核过的帖子保持原状态。
                 continue;
             }
             AuditReq auditReq = new AuditReq();
@@ -123,6 +150,9 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 审核评论。
+     */
     public void auditComment(Long commentId, AuditReq req) {
         Comment comment = commentMapper.selectById(commentId);
         if (comment == null) {
@@ -135,12 +165,20 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    /**
+     * 查询角色字典。
+     */
     public List<SysRole> listRoles() {
         return sysRoleMapper.selectList(null);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    /**
+     * 给用户分配角色。
+     *
+     * <p>先检查是否已有同样关系，避免重复插入触发唯一键冲突。</p>
+     */
     public void assignRole(AssignRoleReq req) {
         requireUser(req.getUserId());
         SysRole role = sysRoleMapper.selectById(req.getRoleId());
@@ -152,6 +190,7 @@ public class AdminServiceImpl implements AdminService {
                 .eq(UserRoleRel::getRoleId, req.getRoleId())
                 .last("LIMIT 1"));
         if (existing != null) {
+            // 幂等处理：已经拥有该角色时直接成功返回。
             return;
         }
         UserRoleRel rel = new UserRoleRel();
@@ -162,6 +201,11 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    /**
+     * 分页查询审计日志。
+     *
+     * <p>先分页查询审计日志，再批量加载操作人昵称，避免逐条查询用户信息。</p>
+     */
     public PageResult<AuditLogResp> pageAuditLogs(AuditLogQueryReq req) {
         LambdaQueryWrapper<AuditLog> wrapper = new LambdaQueryWrapper<>();
         if (req.getOperatorId() != null) {
@@ -207,6 +251,9 @@ public class AdminServiceImpl implements AdminService {
         return result;
     }
 
+    /**
+     * 查询用户，不存在则抛业务异常。
+     */
     private User requireUser(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -215,6 +262,11 @@ public class AdminServiceImpl implements AdminService {
         return user;
     }
 
+    /**
+     * 写入管理员操作审计日志。
+     *
+     * <p>operatorId 来自当前登录上下文，因此后台接口必须经过 ADMIN 鉴权。</p>
+     */
     private void writeAuditLog(String action, String targetType, Long targetId, String detail) {
         AuditLog log = new AuditLog();
         log.setOperatorId(UserContext.getUserId());
@@ -225,6 +277,9 @@ public class AdminServiceImpl implements AdminService {
         auditLogMapper.insert(log);
     }
 
+    /**
+     * 将审计日志实体转换成响应对象，并补充操作人昵称。
+     */
     private AuditLogResp toAuditLogResp(AuditLog log, User operator) {
         AuditLogResp resp = new AuditLogResp();
         resp.setId(log.getId());

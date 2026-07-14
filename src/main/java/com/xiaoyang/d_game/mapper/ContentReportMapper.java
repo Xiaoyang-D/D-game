@@ -5,5 +5,8 @@ import com.xiaoyang.d_game.entity.ContentReport;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
+/**
+ * 内容举报 Mapper。
+ */
 public interface ContentReportMapper extends BaseMapper<ContentReport> {
 }

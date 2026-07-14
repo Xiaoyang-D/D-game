@@ -5,5 +5,8 @@ import com.xiaoyang.d_game.entity.GameCategory;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
+/**
+ * 游戏分类 Mapper。
+ */
 public interface GameCategoryMapper extends BaseMapper<GameCategory> {
 }

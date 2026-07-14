@@ -5,5 +5,8 @@ import com.xiaoyang.d_game.entity.UserRoleRel;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
+/**
+ * 用户角色关联 Mapper。
+ */
 public interface UserRoleRelMapper extends BaseMapper<UserRoleRel> {
 }

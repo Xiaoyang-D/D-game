@@ -1,6 +1,8 @@
 target/
 .idea/
 *.iml
+.env
+.env.*
 .git/
 .gitignore
 uploads/

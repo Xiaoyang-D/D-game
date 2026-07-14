@@ -5,5 +5,8 @@ import com.xiaoyang.d_game.entity.Comment;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
+/**
+ * 评论 Mapper。
+ */
 public interface CommentMapper extends BaseMapper<Comment> {
 }
