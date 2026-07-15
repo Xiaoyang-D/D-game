@@ -25,6 +25,8 @@ public class CommentResp {
     /** 评论作者昵称。 */
     private String userNickname;
 
+    private String userAvatarUrl;
+
     /** 评论正文。 */
     private String content;
 

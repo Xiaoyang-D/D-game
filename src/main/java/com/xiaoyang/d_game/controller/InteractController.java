@@ -2,6 +2,7 @@ package com.xiaoyang.d_game.controller;
 
 import com.xiaoyang.d_game.common.Result;
 import com.xiaoyang.d_game.dto.InteractReq;
+import com.xiaoyang.d_game.dto.InteractionStatusResp;
 import com.xiaoyang.d_game.security.RequireLogin;
 import com.xiaoyang.d_game.service.InteractService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,10 +10,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -27,6 +30,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class InteractController {
 
     private final InteractService interactService;
+
+    /**
+     * 查询当前登录用户对指定目标的点赞和收藏状态。
+     */
+    @RequireLogin
+    @Operation(summary = "查询互动状态")
+    @GetMapping("/interactions/status")
+    public Result<InteractionStatusResp> status(@RequestParam Integer targetType,
+                                                @RequestParam Long targetId) {
+        return Result.success(interactService.getStatus(targetType, targetId));
+    }
 
     /**
      * 点赞帖子或评论。

@@ -20,7 +20,7 @@ public class HtmlSanitizer {
      * 链接和图片只允许 http/https/mailto 等安全协议，避免 {@code javascript:} 形式的注入。</p>
      */
     private static final Whitelist POST_SAFELIST = Whitelist.relaxed()
-            .addTags("span")
+            .addTags("span", "u", "s", "del", "code", "pre", "hr")
             .addAttributes("span", "class")
             .addProtocols("a", "href", "http", "https", "mailto")
             .addProtocols("img", "src", "http", "https");

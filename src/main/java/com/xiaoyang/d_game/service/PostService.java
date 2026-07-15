@@ -4,10 +4,19 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.xiaoyang.d_game.common.PageResult;
 import com.xiaoyang.d_game.dto.BannedAuthorPostQueryReq;
 import com.xiaoyang.d_game.dto.PostCreateReq;
+import com.xiaoyang.d_game.dto.PostCollectionResp;
+import com.xiaoyang.d_game.dto.PostDraftResp;
+import com.xiaoyang.d_game.dto.PostDraftSaveReq;
+import com.xiaoyang.d_game.dto.PostManageItemResp;
+import com.xiaoyang.d_game.dto.PostManagePageResp;
 import com.xiaoyang.d_game.dto.PostQueryReq;
 import com.xiaoyang.d_game.dto.PostRankingQueryReq;
 import com.xiaoyang.d_game.dto.PostResp;
+import com.xiaoyang.d_game.dto.PostPublishReq;
+import com.xiaoyang.d_game.dto.PostTopicResp;
 import com.xiaoyang.d_game.entity.Post;
+
+import java.util.List;
 
 /**
  * 帖子业务接口。
@@ -42,6 +51,18 @@ public interface PostService extends IService<Post> {
      */
     PageResult<PostResp> pageMyPosts(Long page, Long size);
 
+    /** 查询当前用户按状态筛选的发布管理数据。 */
+    PostManagePageResp pageMyPostManagement(String status, Long page, Long size);
+
+    /** 查询当前用户可编辑的任意状态帖子。 */
+    PostManageItemResp getMyManagedPost(Long postId);
+
+    /** 更新当前用户已提交的帖子；非草稿内容会重新进入审核。 */
+    PostManageItemResp updateMyManagedPost(Long postId, PostPublishReq req);
+
+    /** 删除当前用户任意状态的帖子。 */
+    void deleteMyManagedPost(Long postId);
+
     /**
      * 查询当前用户关注对象发布的公开帖子。
      */
@@ -56,4 +77,26 @@ public interface PostService extends IService<Post> {
      * 创建帖子，默认进入待审核状态。
      */
     String createPost(PostCreateReq req);
+
+    String publishPost(PostPublishReq req);
+
+    PageResult<PostDraftResp> pageMyDrafts(Long page, Long size);
+
+    PostDraftResp getMyDraft(Long postId);
+
+    PostDraftResp saveDraft(PostDraftSaveReq req);
+
+    PostDraftResp updateDraft(Long postId, PostDraftSaveReq req);
+
+    void deleteDraft(Long postId);
+
+    String publishDraft(Long postId, PostPublishReq req);
+
+    List<PostTopicResp> searchTopics(String keyword);
+
+    List<PostCollectionResp> listMyCollections();
+
+    PostCollectionResp createMyCollection(String name);
+
+    void publishDuePosts();
 }

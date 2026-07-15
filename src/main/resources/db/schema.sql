@@ -163,12 +163,16 @@ CREATE TABLE IF NOT EXISTS `board` (
 -- 帖子表
 CREATE TABLE IF NOT EXISTS `post` (
     `id`              BIGINT UNSIGNED NOT NULL COMMENT '主键',
-    `board_id`        BIGINT UNSIGNED NOT NULL COMMENT '版块ID',
+    `board_id`        BIGINT UNSIGNED DEFAULT NULL COMMENT '版块ID',
     `game_id`         BIGINT UNSIGNED DEFAULT NULL COMMENT '关联游戏ID',
+    `collection_id`   BIGINT UNSIGNED DEFAULT NULL COMMENT '个人合集ID',
     `user_id`         BIGINT UNSIGNED NOT NULL COMMENT '作者ID',
     `title`           VARCHAR(200)    NOT NULL COMMENT '标题',
     `content`         LONGTEXT        NOT NULL COMMENT '正文',
+    `is_original`     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否原创',
+    `contains_ai_generated` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否包含AI生成内容',
     `status`          TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '状态:0草稿 1待审核 2已通过 3已拒绝',
+    `scheduled_publish_at` DATETIME DEFAULT NULL COMMENT '计划进入审核队列的时间',
     `view_count`      INT UNSIGNED    NOT NULL DEFAULT 0 COMMENT '浏览数',
     `like_count`      INT UNSIGNED    NOT NULL DEFAULT 0 COMMENT '点赞数',
     `comment_count`   INT UNSIGNED    NOT NULL DEFAULT 0 COMMENT '评论数',
@@ -180,6 +184,7 @@ CREATE TABLE IF NOT EXISTS `post` (
     PRIMARY KEY (`id`),
     KEY `idx_board_status` (`board_id`, `status`, `gmt_create`),
     KEY `idx_game_status` (`game_id`, `status`, `gmt_create`),
+    KEY `idx_status_schedule` (`status`, `scheduled_publish_at`),
     KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子表';
 
@@ -342,3 +347,40 @@ CREATE TABLE IF NOT EXISTS `content_report` (
     UNIQUE KEY `uk_reporter_target` (`reporter_id`, `target_type`, `target_id`),
     KEY `idx_status_create` (`status`, `gmt_create`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='content report';
+
+-- 社区话题
+CREATE TABLE IF NOT EXISTS `post_topic` (
+    `id`              BIGINT UNSIGNED NOT NULL COMMENT '主键',
+    `name`            VARCHAR(64)     NOT NULL COMMENT '话题名称',
+    `gmt_create`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `gmt_modified`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+    `is_deleted`      TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否删除:0否 1是',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_post_topic_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='社区话题';
+
+-- 帖子话题关联
+CREATE TABLE IF NOT EXISTS `post_topic_rel` (
+    `id`              BIGINT UNSIGNED NOT NULL COMMENT '主键',
+    `post_id`         BIGINT UNSIGNED NOT NULL COMMENT '帖子ID',
+    `topic_id`        BIGINT UNSIGNED NOT NULL COMMENT '话题ID',
+    `gmt_create`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `gmt_modified`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+    `is_deleted`      TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否删除:0否 1是',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_post_topic` (`post_id`, `topic_id`),
+    KEY `idx_topic_post` (`topic_id`, `post_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='帖子话题关联';
+
+-- 个人合集
+CREATE TABLE IF NOT EXISTS `post_collection` (
+    `id`              BIGINT UNSIGNED NOT NULL COMMENT '主键',
+    `user_id`         BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    `name`            VARCHAR(64)     NOT NULL COMMENT '合集名称',
+    `gmt_create`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `gmt_modified`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+    `is_deleted`      TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否删除:0否 1是',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_collection_name` (`user_id`, `name`),
+    KEY `idx_collection_user` (`user_id`, `gmt_modified`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='个人合集';
