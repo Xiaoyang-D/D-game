@@ -2,9 +2,11 @@ package com.xiaoyang.d_game.dto;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 /**
@@ -32,6 +34,11 @@ public class PostResp {
     /** 关联游戏名称。 */
     private String gameName;
 
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long collectionId;
+
+    private String collectionName;
+
     /** 作者用户 ID。 */
     @JsonSerialize(using = ToStringSerializer.class)
     private Long userId;
@@ -54,8 +61,17 @@ public class PostResp {
     /** 帖子正文，已经过 HTML 安全清洗。 */
     private String content;
 
+    private List<PostTopicResp> topics;
+
+    @JsonProperty("isOriginal")
+    private boolean isOriginal;
+
+    private boolean containsAiGenerated;
+
     /** 帖子审核状态。 */
     private Integer status;
+
+    private LocalDateTime scheduledPublishAt;
 
     /** 浏览数。 */
     private Integer viewCount;

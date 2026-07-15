@@ -4,22 +4,25 @@ import lombok.Data;
 
 @Data
 /**
- * 帖子分页查询请求。
+ * 甯栧瓙鍒嗛〉鏌ヨ璇锋眰銆?
  */
 public class PostQueryReq {
 
-    /** 版块 ID 筛选。 */
+    /** 鐗堝潡 ID 绛涢€夈€?*/
     private Long boardId;
 
-    /** 关联游戏 ID 筛选。 */
+    /** 浣滆€?ID 绛涢€夈€?*/
+    private Long authorId;
+
+    /** 鍏宠仈娓告垙 ID 绛涢€夈€?*/
     private Long gameId;
 
-    /** 标题关键字。 */
+    /** 鏍囬鍏抽敭瀛椼€?*/
     private String keyword;
 
-    /** 页码，从 1 开始。 */
+    /** 椤电爜锛屼粠 1 寮€濮嬨€?*/
     private Long page = 1L;
 
-    /** 每页条数。 */
+    /** 姣忛〉鏉℃暟銆?*/
     private Long size = 10L;
 }

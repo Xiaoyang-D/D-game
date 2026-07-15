@@ -1,8 +1,10 @@
 package com.xiaoyang.d_game.service;
 
 import com.xiaoyang.d_game.common.PageResult;
+import com.xiaoyang.d_game.common.enums.CommentSortTypeEnum;
 import com.xiaoyang.d_game.dto.CommentCreateReq;
 import com.xiaoyang.d_game.dto.CommentResp;
+import com.xiaoyang.d_game.dto.InteractionStatusResp;
 
 /**
  * 用户互动业务接口。
@@ -19,7 +21,12 @@ public interface InteractService {
     /**
      * 分页查询帖子评论。
      */
-    PageResult<CommentResp> pageComments(Long postId, Long page, Long size);
+    PageResult<CommentResp> pageComments(Long postId, Long page, Long size, CommentSortTypeEnum sort);
+
+    /**
+     * 查询当前用户对目标的点赞和收藏状态。
+     */
+    InteractionStatusResp getStatus(Integer targetType, Long targetId);
 
     /**
      * 点赞目标。

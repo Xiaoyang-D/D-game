@@ -6,11 +6,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.PageResult;
 import com.xiaoyang.d_game.common.ResultCode;
+import com.xiaoyang.d_game.common.enums.CommentSortTypeEnum;
 import com.xiaoyang.d_game.common.enums.ContentStatusEnum;
 import com.xiaoyang.d_game.common.enums.NotificationTypeEnum;
 import com.xiaoyang.d_game.common.enums.TargetTypeEnum;
 import com.xiaoyang.d_game.dto.CommentCreateReq;
 import com.xiaoyang.d_game.dto.CommentResp;
+import com.xiaoyang.d_game.dto.InteractionStatusResp;
 import com.xiaoyang.d_game.entity.Comment;
 import com.xiaoyang.d_game.entity.Post;
 import com.xiaoyang.d_game.entity.User;
@@ -27,8 +29,13 @@ import com.xiaoyang.d_game.security.UserContext;
 import com.xiaoyang.d_game.service.InteractService;
 import com.xiaoyang.d_game.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -36,15 +43,19 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-@Service
-@RequiredArgsConstructor
 /**
  * 用户互动业务实现。
  *
  * <p>评论、点赞、收藏和关注都会写关系表或计数字段。涉及多步写入的方法使用事务，
  * 计数字段使用数据库原子表达式更新，减少并发请求下的覆盖问题。</p>
  */
+@Service
+@Slf4j
+@RequiredArgsConstructor
 public class InteractServiceImpl implements InteractService {
+
+    private static final String LIKE_CACHE_KEY_PREFIX = "interaction:like:";
+    private static final String FAVORITE_CACHE_KEY_PREFIX = "interaction:favorite:";
 
     private final CommentMapper commentMapper;
     private final PostMapper postMapper;
@@ -53,6 +64,7 @@ public class InteractServiceImpl implements InteractService {
     private final UserFavoriteMapper userFavoriteMapper;
     private final UserFollowMapper userFollowMapper;
     private final NotificationService notificationService;
+    private final StringRedisTemplate stringRedisTemplate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -95,22 +107,29 @@ public class InteractServiceImpl implements InteractService {
     /**
      * 分页查询评论。
      */
-    public PageResult<CommentResp> pageComments(Long postId, Long page, Long size) {
+    public PageResult<CommentResp> pageComments(Long postId, Long page, Long size, CommentSortTypeEnum sort) {
         Page<Comment> result = new Page<>(page, size);
-        commentMapper.selectPage(result, new LambdaQueryWrapper<Comment>()
+        LambdaQueryWrapper<Comment> wrapper = new LambdaQueryWrapper<Comment>()
                 .eq(Comment::getPostId, postId)
-                .eq(Comment::getStatus, ContentStatusEnum.APPROVED.getCode())
-                .orderByAsc(Comment::getGmtCreate));
+                .eq(Comment::getStatus, ContentStatusEnum.APPROVED.getCode());
+        switch (sort) {
+            case DEFAULT -> wrapper.orderByDesc(Comment::getLikeCount).orderByAsc(Comment::getGmtCreate);
+            case EARLIEST -> wrapper.orderByAsc(Comment::getGmtCreate);
+            case LATEST -> wrapper.orderByDesc(Comment::getGmtCreate);
+        }
+        commentMapper.selectPage(result, wrapper);
         List<Comment> records = result.getRecords();
-        // 批量加载昵称，避免每条评论单独查用户表。
-        Map<Long, String> nickMap = loadNicknames(records.stream().map(Comment::getUserId).distinct().toList());
+        Map<Long, User> userMap = loadCommentUsers(records.stream().map(Comment::getUserId).distinct().toList());
         List<CommentResp> respList = records.stream().map(c -> {
             CommentResp resp = new CommentResp();
+            User commentAuthor = userMap.get(c.getUserId());
             resp.setId(c.getId());
             resp.setPostId(c.getPostId());
             resp.setParentId(c.getParentId());
             resp.setUserId(c.getUserId());
-            resp.setUserNickname(nickMap.get(c.getUserId()));
+            resp.setUserNickname(commentAuthor == null ? "已注销用户"
+                    : StringUtils.hasText(commentAuthor.getNickname()) ? commentAuthor.getNickname() : commentAuthor.getUsername());
+            resp.setUserAvatarUrl(commentAuthor == null ? null : commentAuthor.getAvatarUrl());
             resp.setContent(c.getContent());
             resp.setLikeCount(c.getLikeCount());
             resp.setGmtCreate(c.getGmtCreate());
@@ -122,6 +141,26 @@ public class InteractServiceImpl implements InteractService {
         pageResult.setTotal(result.getTotal());
         pageResult.setRecords(respList);
         return pageResult;
+    }
+
+    @Override
+    /**
+     * 查询当前用户对目标的互动状态。
+     *
+     * <p>Redis Set 只保存正向缓存：如果集合里有当前用户 ID，说明用户已互动；
+     * 如果集合里没有，则回源数据库确认，避免 Redis 缓存丢失导致误判。</p>
+     */
+    public InteractionStatusResp getStatus(Integer targetType, Long targetId) {
+        Long userId = currentUserId();
+        if (targetType == null || targetId == null) {
+            throw new BizException(ResultCode.BAD_REQUEST);
+        }
+        TargetTypeEnum.of(targetType);
+
+        InteractionStatusResp resp = new InteractionStatusResp();
+        resp.setLiked(isInteractionCachedOrPersisted(true, targetType, targetId, userId));
+        resp.setFavorited(isInteractionCachedOrPersisted(false, targetType, targetId, userId));
+        return resp;
     }
 
     @Override
@@ -140,6 +179,8 @@ public class InteractServiceImpl implements InteractService {
         if (existing != null) {
             throw new BizException(ResultCode.ALREADY_LIKED);
         }
+        // 清理历史逻辑删除记录，释放 user_id + target_type + target_id 唯一键。
+        userLikeMapper.deletePhysicallyByUserAndTarget(userId, targetType, targetId);
         // 关系表先记录“谁点赞了什么”，再维护目标上的冗余计数。
         UserLike like = new UserLike();
         like.setUserId(userId);
@@ -147,6 +188,7 @@ public class InteractServiceImpl implements InteractService {
         like.setTargetId(targetId);
         userLikeMapper.insert(like);
         adjustLikeCount(type, targetId, 1, userId);
+        cacheInteractionAfterCommit(true, targetType, targetId, userId, true);
     }
 
     @Override
@@ -165,8 +207,9 @@ public class InteractServiceImpl implements InteractService {
         if (existing == null) {
             throw new BizException(ResultCode.NOT_LIKED);
         }
-        userLikeMapper.deleteById(existing.getId());
+        userLikeMapper.deletePhysicallyByUserAndTarget(userId, targetType, targetId);
         adjustLikeCount(type, targetId, -1, userId);
+        cacheInteractionAfterCommit(true, targetType, targetId, userId, false);
     }
 
     @Override
@@ -184,6 +227,8 @@ public class InteractServiceImpl implements InteractService {
         if (existing != null) {
             throw new BizException(ResultCode.ALREADY_FAVORITED);
         }
+        // 清理历史逻辑删除记录，释放 user_id + target_type + target_id 唯一键。
+        userFavoriteMapper.deletePhysicallyByUserAndTarget(userId, targetType, targetId);
         UserFavorite favorite = new UserFavorite();
         favorite.setUserId(userId);
         favorite.setTargetType(targetType);
@@ -196,6 +241,7 @@ public class InteractServiceImpl implements InteractService {
                 incrementPostCounter(post.getId(), "favorite_count", 1);
             }
         }
+        cacheInteractionAfterCommit(false, targetType, targetId, userId, true);
     }
 
     @Override
@@ -213,13 +259,14 @@ public class InteractServiceImpl implements InteractService {
         if (existing == null) {
             throw new BizException(ResultCode.NOT_FAVORITED);
         }
-        userFavoriteMapper.deleteById(existing.getId());
+        userFavoriteMapper.deletePhysicallyByUserAndTarget(userId, targetType, targetId);
         if (Objects.equals(targetType, TargetTypeEnum.POST.getCode())) {
             Post post = postMapper.selectById(targetId);
             if (post != null && post.getFavoriteCount() > 0) {
                 incrementPostCounter(post.getId(), "favorite_count", -1);
             }
         }
+        cacheInteractionAfterCommit(false, targetType, targetId, userId, false);
     }
 
     @Override
@@ -269,6 +316,80 @@ public class InteractServiceImpl implements InteractService {
     }
 
     /**
+     * 优先使用 Redis Set 判断状态；Redis 未命中时回源数据库。
+     */
+    private boolean isInteractionCachedOrPersisted(boolean like, Integer targetType, Long targetId, Long userId) {
+        String key = interactionCacheKey(like, targetType, targetId);
+        String member = String.valueOf(userId);
+        try {
+            if (Boolean.TRUE.equals(stringRedisTemplate.opsForSet().isMember(key, member))) {
+                return true;
+            }
+        } catch (RuntimeException e) {
+            log.warn("查询互动状态 Redis 缓存失败, key={}, userId={}", key, userId, e);
+        }
+
+        boolean exists = like ? existsLike(targetType, targetId, userId) : existsFavorite(targetType, targetId, userId);
+        if (exists) {
+            cacheInteraction(like, targetType, targetId, userId, true);
+        }
+        return exists;
+    }
+
+    private boolean existsLike(Integer targetType, Long targetId, Long userId) {
+        return userLikeMapper.selectCount(new LambdaQueryWrapper<UserLike>()
+                .eq(UserLike::getUserId, userId)
+                .eq(UserLike::getTargetType, targetType)
+                .eq(UserLike::getTargetId, targetId)) > 0;
+    }
+
+    private boolean existsFavorite(Integer targetType, Long targetId, Long userId) {
+        return userFavoriteMapper.selectCount(new LambdaQueryWrapper<UserFavorite>()
+                .eq(UserFavorite::getUserId, userId)
+                .eq(UserFavorite::getTargetType, targetType)
+                .eq(UserFavorite::getTargetId, targetId)) > 0;
+    }
+
+    /**
+     * 写操作提交成功后再同步 Redis，避免业务事务回滚但缓存已更新。
+     */
+    private void cacheInteractionAfterCommit(boolean like, Integer targetType, Long targetId, Long userId, boolean add) {
+        Runnable task = () -> cacheInteraction(like, targetType, targetId, userId, add);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
+    }
+
+    /**
+     * 同步 Redis Set。缓存失败只影响加速查询，不影响数据库事实。
+     */
+    private void cacheInteraction(boolean like, Integer targetType, Long targetId, Long userId, boolean add) {
+        String key = interactionCacheKey(like, targetType, targetId);
+        String member = String.valueOf(userId);
+        try {
+            if (add) {
+                stringRedisTemplate.opsForSet().add(key, member);
+            } else {
+                stringRedisTemplate.opsForSet().remove(key, member);
+            }
+        } catch (RuntimeException e) {
+            log.warn("同步互动状态 Redis 缓存失败, key={}, userId={}, add={}", key, userId, add, e);
+        }
+    }
+
+    private String interactionCacheKey(boolean like, Integer targetType, Long targetId) {
+        String prefix = like ? LIKE_CACHE_KEY_PREFIX : FAVORITE_CACHE_KEY_PREFIX;
+        return prefix + targetType + ":" + targetId;
+    }
+
+    /**
      * 根据目标类型调整点赞数并发送通知。
      *
      * <p>帖子和评论的计数字段位于不同表，因此这里按目标类型分派。</p>
@@ -304,12 +425,12 @@ public class InteractServiceImpl implements InteractService {
     /**
      * 批量加载用户昵称。
      */
-    private Map<Long, String> loadNicknames(List<Long> userIds) {
+    private Map<Long, User> loadCommentUsers(List<Long> userIds) {
         if (userIds == null || userIds.isEmpty()) {
             return Map.of();
         }
         return userMapper.selectBatchIds(userIds).stream()
-                .collect(Collectors.toMap(User::getId, User::getNickname, (a, b) -> a));
+                .collect(Collectors.toMap(User::getId, Function.identity(), (a, b) -> a));
     }
 
     /**

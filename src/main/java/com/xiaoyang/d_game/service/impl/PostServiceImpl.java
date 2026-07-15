@@ -11,19 +11,32 @@ import com.xiaoyang.d_game.common.HtmlSanitizer;
 import com.xiaoyang.d_game.common.enums.ContentStatusEnum;
 import com.xiaoyang.d_game.common.enums.UserStatusEnum;
 import com.xiaoyang.d_game.dto.BannedAuthorPostQueryReq;
+import com.xiaoyang.d_game.dto.PostCollectionResp;
 import com.xiaoyang.d_game.common.enums.PostRankingTypeEnum;
 import com.xiaoyang.d_game.dto.PostCreateReq;
+import com.xiaoyang.d_game.dto.PostDraftResp;
+import com.xiaoyang.d_game.dto.PostDraftSaveReq;
+import com.xiaoyang.d_game.dto.PostManageItemResp;
+import com.xiaoyang.d_game.dto.PostManagePageResp;
 import com.xiaoyang.d_game.dto.PostQueryReq;
 import com.xiaoyang.d_game.dto.PostRankingQueryReq;
 import com.xiaoyang.d_game.dto.PostResp;
+import com.xiaoyang.d_game.dto.PostPublishReq;
+import com.xiaoyang.d_game.dto.PostTopicResp;
 import com.xiaoyang.d_game.entity.Board;
 import com.xiaoyang.d_game.entity.Game;
 import com.xiaoyang.d_game.entity.Post;
+import com.xiaoyang.d_game.entity.PostCollection;
+import com.xiaoyang.d_game.entity.PostTopic;
+import com.xiaoyang.d_game.entity.PostTopicRel;
 import com.xiaoyang.d_game.entity.User;
 import com.xiaoyang.d_game.entity.UserFollow;
 import com.xiaoyang.d_game.mapper.BoardMapper;
 import com.xiaoyang.d_game.mapper.GameMapper;
 import com.xiaoyang.d_game.mapper.PostMapper;
+import com.xiaoyang.d_game.mapper.PostCollectionMapper;
+import com.xiaoyang.d_game.mapper.PostTopicMapper;
+import com.xiaoyang.d_game.mapper.PostTopicRelMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
 import com.xiaoyang.d_game.security.UserContext;
@@ -35,8 +48,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Service
 @Slf4j
@@ -49,11 +69,16 @@ import java.util.Objects;
  */
 public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements PostService {
 
+    private static final ZoneId SHANGHAI_ZONE = ZoneId.of("Asia/Shanghai");
+
     private final BoardMapper boardMapper;
     private final GameMapper gameMapper;
     private final UserMapper userMapper;
     private final UserFollowMapper userFollowMapper;
     private final HtmlSanitizer htmlSanitizer;
+    private final PostTopicMapper postTopicMapper;
+    private final PostTopicRelMapper postTopicRelMapper;
+    private final PostCollectionMapper postCollectionMapper;
 
     @Override
     /**
@@ -68,6 +93,18 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         wrapper.eq(Post::getStatus, ContentStatusEnum.APPROVED.getCode());
         if (req.getBoardId() != null) {
             wrapper.eq(Post::getBoardId, req.getBoardId());
+        }
+        if (req.getAuthorId() != null) {
+            User author = userMapper.selectById(req.getAuthorId());
+            Long currentUserId = UserContext.getUserId();
+            UserContext context = UserContext.get();
+            boolean isAuthor = currentUserId != null && Objects.equals(currentUserId, req.getAuthorId());
+            boolean isAdmin = context != null && context.hasRole("ADMIN");
+            if (author == null || (Objects.equals(author.getStatus(), UserStatusEnum.BANNED.getCode())
+                    && !isAuthor && !isAdmin)) {
+                return emptyPageResult(req.getPage(), req.getSize());
+            }
+            wrapper.eq(Post::getUserId, req.getAuthorId());
         }
         if (req.getGameId() != null) {
             wrapper.eq(Post::getGameId, req.getGameId());
@@ -184,6 +221,74 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     @Override
     /**
+     * 查询当前用户的发布管理列表。
+     *
+     * <p>列表只返回指定审核状态，统计数量则覆盖四种状态，保证 Tab 切换时数字稳定。</p>
+     */
+    public PostManagePageResp pageMyPostManagement(String status, Long page, Long size) {
+        Long userId = currentUserId();
+        ContentStatusEnum contentStatus = resolveManageStatus(status);
+        long safePage = page == null || page < 1 ? 1 : page;
+        long safeSize = size == null || size < 1 ? 10 : Math.min(size, 50);
+
+        Page<Post> result = page(new Page<>(safePage, safeSize), new LambdaQueryWrapper<Post>()
+                .eq(Post::getUserId, userId)
+                .eq(Post::getStatus, contentStatus.getCode())
+                .orderByDesc(Post::getGmtModified));
+        PageResult<PostManageItemResp> pageResult = new PageResult<>();
+        pageResult.setPage(result.getCurrent());
+        pageResult.setSize(result.getSize());
+        pageResult.setTotal(result.getTotal());
+        pageResult.setRecords(result.getRecords().stream().map(this::toManageItemResp).toList());
+
+        PostManagePageResp response = PostManagePageResp.from(pageResult);
+        response.setPublishedCount(countMyPostsByStatus(userId, ContentStatusEnum.APPROVED));
+        response.setPendingCount(countMyPostsByStatus(userId, ContentStatusEnum.PENDING));
+        response.setRejectedCount(countMyPostsByStatus(userId, ContentStatusEnum.REJECTED));
+        response.setDraftCount(countMyPostsByStatus(userId, ContentStatusEnum.DRAFT));
+        return response;
+    }
+
+    @Override
+    /** 查询当前用户自己的帖子详情，不向其他用户暴露管理数据。 */
+    public PostManageItemResp getMyManagedPost(Long postId) {
+        return toManageItemResp(getRequiredManagedPost(postId, currentUserId()));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    /**
+     * 更新管理页帖子。
+     *
+     * <p>草稿保持草稿状态；已发布、审核中和未通过的内容修改后统一转为待审核。</p>
+     */
+    public PostManageItemResp updateMyManagedPost(Long postId, PostPublishReq req) {
+        Long userId = currentUserId();
+        Post post = getRequiredManagedPost(postId, userId);
+        validatePublishRequest(req, userId);
+        applyPublishFields(post, req, userId);
+        if (Objects.equals(post.getStatus(), ContentStatusEnum.DRAFT.getCode())) {
+            post.setStatus(ContentStatusEnum.DRAFT.getCode());
+        } else {
+            // Revisions to submitted content must be reviewed again before becoming public.
+            post.setStatus(ContentStatusEnum.PENDING.getCode());
+            post.setScheduledPublishAt(null);
+        }
+        updateById(post);
+        replaceTopics(post.getId(), req.getTopicNames());
+        return toManageItemResp(post);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    /** 删除当前用户任意状态的帖子，并由 MyBatis-Plus 执行逻辑删除。 */
+    public void deleteMyManagedPost(Long postId) {
+        Post post = getRequiredManagedPost(postId, currentUserId());
+        removeById(post.getId());
+    }
+
+    @Override
+    /**
      * 查询关注用户的公开帖子。
      */
     public PageResult<PostResp> pageFollowingPosts(Long page, Long size) {
@@ -276,6 +381,431 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         return String.valueOf(post.getId());
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String publishPost(PostPublishReq req) {
+        Long userId = currentUserId();
+        validatePublishRequest(req, userId);
+        Post post = new Post();
+        applyPublishFields(post, req, userId);
+        post.setStatus(req.getScheduledPublishAt() == null
+                ? ContentStatusEnum.PENDING.getCode()
+                : ContentStatusEnum.DRAFT.getCode());
+        save(post);
+        replaceTopics(post.getId(), req.getTopicNames());
+        return String.valueOf(post.getId());
+    }
+
+    @Override
+    public PageResult<PostDraftResp> pageMyDrafts(Long page, Long size) {
+        Long userId = currentUserId();
+        Page<Post> result = page(new Page<>(page == null || page < 1 ? 1 : page, size == null || size < 1 ? 10 : size),
+                new LambdaQueryWrapper<Post>()
+                        .eq(Post::getUserId, userId)
+                        .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
+                        .orderByDesc(Post::getGmtModified));
+        PageResult<PostDraftResp> response = new PageResult<>();
+        response.setPage(result.getCurrent());
+        response.setSize(result.getSize());
+        response.setTotal(result.getTotal());
+        response.setRecords(result.getRecords().stream().map(this::toDraftResp).toList());
+        return response;
+    }
+
+    @Override
+    public PostDraftResp getMyDraft(Long postId) {
+        return toDraftResp(getRequiredDraft(postId, currentUserId()));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PostDraftResp saveDraft(PostDraftSaveReq req) {
+        Long userId = currentUserId();
+        validateDraftFields(req);
+        validateCollectionOwner(req.getCollectionId(), userId);
+        if (req.getScheduledPublishAt() != null) {
+            validateScheduledDraft(req, userId);
+        }
+        Post post = new Post();
+        post.setUserId(userId);
+        applyDraftFields(post, req);
+        post.setStatus(ContentStatusEnum.DRAFT.getCode());
+        save(post);
+        replaceTopics(post.getId(), req.getTopicNames());
+        return toDraftResp(post);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PostDraftResp updateDraft(Long postId, PostDraftSaveReq req) {
+        Long userId = currentUserId();
+        Post post = getRequiredDraft(postId, userId);
+        validateDraftFields(req);
+        validateCollectionOwner(req.getCollectionId(), userId);
+        if (req.getScheduledPublishAt() != null) {
+            validateScheduledDraft(req, userId);
+        }
+        applyDraftFields(post, req);
+        updateById(post);
+        replaceTopics(post.getId(), req.getTopicNames());
+        return toDraftResp(post);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteDraft(Long postId) {
+        Post post = getRequiredDraft(postId, currentUserId());
+        removeById(post.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String publishDraft(Long postId, PostPublishReq req) {
+        Long userId = currentUserId();
+        Post post = getRequiredDraft(postId, userId);
+        validatePublishRequest(req, userId);
+        applyPublishFields(post, req, userId);
+        post.setStatus(req.getScheduledPublishAt() == null
+                ? ContentStatusEnum.PENDING.getCode()
+                : ContentStatusEnum.DRAFT.getCode());
+        updateById(post);
+        replaceTopics(post.getId(), req.getTopicNames());
+        return String.valueOf(post.getId());
+    }
+
+    @Override
+    public List<PostTopicResp> searchTopics(String keyword) {
+        LambdaQueryWrapper<PostTopic> wrapper = new LambdaQueryWrapper<PostTopic>()
+                .orderByAsc(PostTopic::getName)
+                .last("LIMIT 20");
+        if (StringUtils.hasText(keyword)) {
+            wrapper.like(PostTopic::getName, keyword.trim());
+        }
+        return postTopicMapper.selectList(wrapper).stream().map(this::toTopicResp).toList();
+    }
+
+    @Override
+    public List<PostCollectionResp> listMyCollections() {
+        Long userId = currentUserId();
+        return postCollectionMapper.selectList(new LambdaQueryWrapper<PostCollection>()
+                        .eq(PostCollection::getUserId, userId)
+                        .orderByDesc(PostCollection::getGmtModified))
+                .stream().map(this::toCollectionResp).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PostCollectionResp createMyCollection(String name) {
+        Long userId = currentUserId();
+        if (!StringUtils.hasText(name) || name.trim().length() > 64) {
+            throw new BizException(ResultCode.BAD_REQUEST, "合集名称不能为空且不能超过64个字符");
+        }
+        String normalizedName = name.trim();
+        if (postCollectionMapper.selectCount(new LambdaQueryWrapper<PostCollection>()
+                .eq(PostCollection::getUserId, userId)
+                .eq(PostCollection::getName, normalizedName)) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "合集名称已存在");
+        }
+        PostCollection collection = new PostCollection();
+        collection.setUserId(userId);
+        collection.setName(normalizedName);
+        postCollectionMapper.insert(collection);
+        return toCollectionResp(collection);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void publishDuePosts() {
+        LocalDateTime now = LocalDateTime.now(SHANGHAI_ZONE);
+        List<Post> duePosts = list(new LambdaQueryWrapper<Post>()
+                .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
+                .isNotNull(Post::getScheduledPublishAt)
+                .le(Post::getScheduledPublishAt, now)
+                .last("LIMIT 100"));
+        for (Post post : duePosts) {
+            update(new LambdaUpdateWrapper<Post>()
+                    .eq(Post::getId, post.getId())
+                    .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
+                    .set(Post::getStatus, ContentStatusEnum.PENDING.getCode())
+                    .set(Post::getScheduledPublishAt, null));
+        }
+    }
+
+    private Long currentUserId() {
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED);
+        }
+        return userId;
+    }
+
+    private Post getRequiredDraft(Long postId, Long userId) {
+        Post post = getById(postId);
+        if (post == null || !Objects.equals(post.getUserId(), userId)
+                || !Objects.equals(post.getStatus(), ContentStatusEnum.DRAFT.getCode())) {
+            throw new BizException(ResultCode.POST_NOT_FOUND);
+        }
+        return post;
+    }
+
+    private Post getRequiredManagedPost(Long postId, Long userId) {
+        Post post = getById(postId);
+        if (post == null || !Objects.equals(post.getUserId(), userId)) {
+            // Do not reveal another user's private draft or management metadata.
+            throw new BizException(ResultCode.POST_NOT_FOUND);
+        }
+        return post;
+    }
+
+    private ContentStatusEnum resolveManageStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            return ContentStatusEnum.APPROVED;
+        }
+        for (ContentStatusEnum value : ContentStatusEnum.values()) {
+            if (value.name().equalsIgnoreCase(status.trim())) {
+                return value;
+            }
+        }
+        throw new BizException(ResultCode.BAD_REQUEST, "无效的发布管理状态");
+    }
+
+    private long countMyPostsByStatus(Long userId, ContentStatusEnum status) {
+        return count(new LambdaQueryWrapper<Post>()
+                .eq(Post::getUserId, userId)
+                .eq(Post::getStatus, status.getCode()));
+    }
+
+    private void validateDraftFields(PostDraftSaveReq req) {
+        if (req.getTitle() != null && req.getTitle().length() > 40) {
+            throw new BizException(ResultCode.BAD_REQUEST, "标题长度不能超过40");
+        }
+        if (req.getContent() != null && req.getContent().length() > 20000) {
+            throw new BizException(ResultCode.BAD_REQUEST, "正文长度不能超过20000");
+        }
+        normalizeTopicNames(req.getTopicNames());
+    }
+
+    private void validatePublishRequest(PostPublishReq req, Long userId) {
+        if (req.getBoardId() == null || !StringUtils.hasText(req.getTitle()) || !StringUtils.hasText(req.getContent())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "版块、标题和正文不能为空");
+        }
+        if (req.getTitle().trim().length() > 40 || req.getContent().length() > 20000) {
+            throw new BizException(ResultCode.BAD_REQUEST, "标题或正文超过长度限制");
+        }
+        if (boardMapper.selectById(req.getBoardId()) == null) {
+            throw new BizException(ResultCode.BOARD_NOT_FOUND);
+        }
+        if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
+            throw new BizException(ResultCode.GAME_NOT_FOUND);
+        }
+        validateCollectionOwner(req.getCollectionId(), userId);
+        normalizeTopicNames(req.getTopicNames());
+        if (req.getScheduledPublishAt() != null) {
+            validateSchedule(req.getScheduledPublishAt());
+        }
+    }
+
+    /**
+     * A scheduled draft is already a publishable submission. Keep ordinary drafts
+     * permissive, but require all publish fields before accepting a schedule.
+     */
+    private void validateScheduledDraft(PostDraftSaveReq req, Long userId) {
+        if (req.getBoardId() == null || !StringUtils.hasText(req.getTitle())
+                || !StringUtils.hasText(req.getContent())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "定时发布需要版块、标题和正文");
+        }
+        if (req.getTitle().trim().length() > 40 || req.getContent().length() > 20000) {
+            throw new BizException(ResultCode.BAD_REQUEST, "标题或正文超过长度限制");
+        }
+        if (boardMapper.selectById(req.getBoardId()) == null) {
+            throw new BizException(ResultCode.BOARD_NOT_FOUND);
+        }
+        if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
+            throw new BizException(ResultCode.GAME_NOT_FOUND);
+        }
+        validateCollectionOwner(req.getCollectionId(), userId);
+        normalizeTopicNames(req.getTopicNames());
+        validateSchedule(req.getScheduledPublishAt());
+    }
+
+    private void validateSchedule(LocalDateTime scheduledAt) {
+        LocalDateTime now = LocalDateTime.now(SHANGHAI_ZONE);
+        if (scheduledAt.isBefore(now.plusHours(2)) || scheduledAt.isAfter(now.plusDays(15))) {
+            throw new BizException(ResultCode.BAD_REQUEST, "定时发布时间必须在当前时间后2小时至15天内");
+        }
+    }
+
+    private void validateCollectionOwner(Long collectionId, Long userId) {
+        if (collectionId == null) {
+            return;
+        }
+        PostCollection collection = postCollectionMapper.selectOne(new LambdaQueryWrapper<PostCollection>()
+                .eq(PostCollection::getId, collectionId)
+                .eq(PostCollection::getUserId, userId)
+                .last("LIMIT 1"));
+        if (collection == null) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权使用该合集");
+        }
+    }
+
+    private void applyDraftFields(Post post, PostDraftSaveReq req) {
+        post.setBoardId(req.getBoardId());
+        post.setGameId(req.getGameId());
+        post.setCollectionId(req.getCollectionId());
+        post.setTitle(req.getTitle() == null ? "" : req.getTitle().trim());
+        post.setContent(htmlSanitizer.sanitizePostContent(req.getContent() == null ? "" : req.getContent()));
+        post.setIsOriginal(Boolean.TRUE.equals(req.getIsOriginal()));
+        post.setContainsAiGenerated(Boolean.TRUE.equals(req.getContainsAiGenerated()));
+        post.setScheduledPublishAt(req.getScheduledPublishAt());
+    }
+
+    private void applyPublishFields(Post post, PostPublishReq req, Long userId) {
+        post.setUserId(userId);
+        post.setBoardId(req.getBoardId());
+        post.setGameId(req.getGameId());
+        post.setCollectionId(req.getCollectionId());
+        post.setTitle(req.getTitle().trim());
+        post.setContent(htmlSanitizer.sanitizePostContent(req.getContent()));
+        post.setIsOriginal(Boolean.TRUE.equals(req.getIsOriginal()));
+        post.setContainsAiGenerated(Boolean.TRUE.equals(req.getContainsAiGenerated()));
+        post.setScheduledPublishAt(req.getScheduledPublishAt());
+    }
+
+    private List<String> normalizeTopicNames(List<String> names) {
+        if (names == null || names.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String name : names) {
+            if (!StringUtils.hasText(name)) {
+                continue;
+            }
+            String value = name.trim();
+            if (value.startsWith("#")) {
+                value = value.substring(1).trim();
+            }
+            if (value.length() > 64) {
+                throw new BizException(ResultCode.BAD_REQUEST, "话题长度不能超过64个字符");
+            }
+            if (!value.isEmpty()) {
+                normalized.add(value);
+            }
+        }
+        if (normalized.size() > 5) {
+            throw new BizException(ResultCode.BAD_REQUEST, "话题最多选择5个");
+        }
+        return new ArrayList<>(normalized);
+    }
+
+    private void replaceTopics(Long postId, List<String> names) {
+        postTopicRelMapper.deletePhysicallyByPostId(postId);
+        for (String name : normalizeTopicNames(names)) {
+            PostTopic topic = postTopicMapper.selectOne(new LambdaQueryWrapper<PostTopic>()
+                    .eq(PostTopic::getName, name)
+                    .last("LIMIT 1"));
+            if (topic == null) {
+                topic = new PostTopic();
+                topic.setName(name);
+                postTopicMapper.insert(topic);
+            }
+            PostTopicRel relation = new PostTopicRel();
+            relation.setPostId(postId);
+            relation.setTopicId(topic.getId());
+            postTopicRelMapper.insert(relation);
+        }
+    }
+
+    private List<PostTopicResp> loadTopics(Long postId) {
+        List<PostTopicRel> relations = postTopicRelMapper.selectList(new LambdaQueryWrapper<PostTopicRel>()
+                .eq(PostTopicRel::getPostId, postId)
+                .orderByAsc(PostTopicRel::getGmtCreate));
+        if (relations.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, PostTopic> topics = postTopicMapper.selectBatchIds(relations.stream()
+                        .map(PostTopicRel::getTopicId).toList())
+                .stream().collect(Collectors.toMap(PostTopic::getId, topic -> topic, (first, ignored) -> first));
+        return relations.stream().map(PostTopicRel::getTopicId).map(topics::get)
+                .filter(Objects::nonNull).map(this::toTopicResp).toList();
+    }
+
+    private PostTopicResp toTopicResp(PostTopic topic) {
+        PostTopicResp response = new PostTopicResp();
+        response.setId(topic.getId());
+        response.setName(topic.getName());
+        return response;
+    }
+
+    private PostCollectionResp toCollectionResp(PostCollection collection) {
+        PostCollectionResp response = new PostCollectionResp();
+        response.setId(collection.getId());
+        response.setName(collection.getName());
+        return response;
+    }
+
+    private PostDraftResp toDraftResp(Post post) {
+        PostDraftResp response = new PostDraftResp();
+        response.setId(post.getId());
+        response.setBoardId(post.getBoardId());
+        if (post.getBoardId() != null) {
+            Board board = boardMapper.selectById(post.getBoardId());
+            response.setBoardName(board == null ? null : board.getName());
+        }
+        response.setGameId(post.getGameId());
+        if (post.getGameId() != null) {
+            Game game = gameMapper.selectById(post.getGameId());
+            response.setGameName(game == null ? null : game.getName());
+        }
+        response.setTitle(post.getTitle());
+        response.setContent(htmlSanitizer.sanitizePostContent(post.getContent()));
+        response.setStatus(post.getStatus());
+        response.setIsOriginal(post.getIsOriginal());
+        response.setContainsAiGenerated(post.getContainsAiGenerated());
+        response.setScheduledPublishAt(post.getScheduledPublishAt());
+        response.setCollectionId(post.getCollectionId());
+        if (post.getCollectionId() != null) {
+            PostCollection collection = postCollectionMapper.selectById(post.getCollectionId());
+            response.setCollectionName(collection == null ? null : collection.getName());
+        }
+        response.setTopics(loadTopics(post.getId()));
+        response.setGmtModified(post.getGmtModified());
+        return response;
+    }
+
+    private PostManageItemResp toManageItemResp(Post post) {
+        PostManageItemResp response = new PostManageItemResp();
+        response.setId(post.getId());
+        response.setBoardId(post.getBoardId());
+        if (post.getBoardId() != null) {
+            Board board = boardMapper.selectById(post.getBoardId());
+            response.setBoardName(board == null ? null : board.getName());
+        }
+        response.setGameId(post.getGameId());
+        if (post.getGameId() != null) {
+            Game game = gameMapper.selectById(post.getGameId());
+            response.setGameName(game == null ? null : game.getName());
+        }
+        response.setCollectionId(post.getCollectionId());
+        if (post.getCollectionId() != null) {
+            PostCollection collection = postCollectionMapper.selectById(post.getCollectionId());
+            response.setCollectionName(collection == null ? null : collection.getName());
+        }
+        response.setTitle(post.getTitle());
+        response.setContent(htmlSanitizer.sanitizePostContent(post.getContent()));
+        response.setStatus(post.getStatus());
+        response.setIsOriginal(Boolean.TRUE.equals(post.getIsOriginal()));
+        response.setContainsAiGenerated(Boolean.TRUE.equals(post.getContainsAiGenerated()));
+        response.setTopics(loadTopics(post.getId()));
+        response.setViewCount(post.getViewCount());
+        response.setLikeCount(post.getLikeCount());
+        response.setCommentCount(post.getCommentCount());
+        response.setFavoriteCount(post.getFavoriteCount());
+        response.setScheduledPublishAt(post.getScheduledPublishAt());
+        response.setGmtCreate(post.getGmtCreate());
+        response.setGmtModified(post.getGmtModified());
+        return response;
+    }
+
     /**
      * 将帖子实体转换为前端响应。
      *
@@ -296,8 +826,19 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         resp.setCommentCount(post.getCommentCount());
         resp.setFavoriteCount(post.getFavoriteCount());
         resp.setGmtCreate(post.getGmtCreate());
-        Board board = boardMapper.selectById(post.getBoardId());
-        resp.setBoardName(board == null ? null : board.getName());
+        resp.setCollectionId(post.getCollectionId());
+        if (post.getCollectionId() != null) {
+            PostCollection collection = postCollectionMapper.selectById(post.getCollectionId());
+            resp.setCollectionName(collection == null ? null : collection.getName());
+        }
+        resp.setTopics(loadTopics(post.getId()));
+        resp.setOriginal(Boolean.TRUE.equals(post.getIsOriginal()));
+        resp.setContainsAiGenerated(Boolean.TRUE.equals(post.getContainsAiGenerated()));
+        resp.setScheduledPublishAt(post.getScheduledPublishAt());
+        if (post.getBoardId() != null) {
+            Board board = boardMapper.selectById(post.getBoardId());
+            resp.setBoardName(board == null ? null : board.getName());
+        }
         if (post.getGameId() != null) {
             Game game = gameMapper.selectById(post.getGameId());
             resp.setGameName(game == null ? null : game.getName());

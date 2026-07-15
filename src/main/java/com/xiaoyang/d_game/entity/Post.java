@@ -23,6 +23,9 @@ public class Post extends BaseEntity {
     /** 关联游戏 ID，可为空。 */
     private Long gameId;
 
+    /** Personal collection selected by the author. */
+    private Long collectionId;
+
     /** 作者用户 ID。 */
     private Long userId;
 
@@ -32,8 +35,14 @@ public class Post extends BaseEntity {
     /** 帖子正文，允许清洗后的富文本 HTML。 */
     private String content;
 
+    private Boolean isOriginal = false;
+
+    private Boolean containsAiGenerated = false;
+
     /** 帖子状态，取值见 {@link ContentStatusEnum}。 */
     private Integer status = ContentStatusEnum.PENDING.getCode();
+
+    private java.time.LocalDateTime scheduledPublishAt;
 
     /** 浏览次数。 */
     private Integer viewCount = 0;

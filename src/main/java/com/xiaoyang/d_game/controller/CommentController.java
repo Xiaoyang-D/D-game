@@ -2,6 +2,7 @@ package com.xiaoyang.d_game.controller;
 
 import com.xiaoyang.d_game.common.PageResult;
 import com.xiaoyang.d_game.common.Result;
+import com.xiaoyang.d_game.common.enums.CommentSortTypeEnum;
 import com.xiaoyang.d_game.dto.CommentCreateReq;
 import com.xiaoyang.d_game.dto.CommentResp;
 import com.xiaoyang.d_game.security.RequireLogin;
@@ -40,8 +41,9 @@ public class CommentController {
     @GetMapping
     public Result<PageResult<CommentResp>> list(@RequestParam Long postId,
                                                 @RequestParam(defaultValue = "1") Long page,
-                                                @RequestParam(defaultValue = "10") Long size) {
-        return Result.success(interactService.pageComments(postId, page, size));
+                                                @RequestParam(defaultValue = "10") Long size,
+                                                @RequestParam(defaultValue = "DEFAULT") String sort) {
+        return Result.success(interactService.pageComments(postId, page, size, CommentSortTypeEnum.from(sort)));
     }
 
     /**
