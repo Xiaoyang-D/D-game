@@ -25,7 +25,7 @@ import com.xiaoyang.d_game.mapper.GameRatingMapper;
 import com.xiaoyang.d_game.mapper.GameTagRelMapper;
 import com.xiaoyang.d_game.mapper.TagMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.GameService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -160,7 +160,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
      * <p>同一用户对同一游戏只能有一条评分记录；重复评分会覆盖原评分，并在事务内回算游戏汇总评分。</p>
      */
     public void rateGame(Long gameId, GameRatingReq req) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }

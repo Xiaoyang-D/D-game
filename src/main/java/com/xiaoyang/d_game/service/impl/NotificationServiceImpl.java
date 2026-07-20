@@ -11,7 +11,7 @@ import com.xiaoyang.d_game.entity.Notification;
 import com.xiaoyang.d_game.mapper.NotificationMapper;
 import com.xiaoyang.d_game.messaging.notification.NotificationEvent;
 import com.xiaoyang.d_game.messaging.notification.NotificationEventPublisher;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -167,7 +167,7 @@ public class NotificationServiceImpl extends ServiceImpl<NotificationMapper, Not
      * 获取当前登录用户。
      */
     private Long currentUserId() {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }

@@ -11,7 +11,7 @@ import com.xiaoyang.d_game.dto.ReportCreateReq;
 import com.xiaoyang.d_game.dto.ReportResp;
 import com.xiaoyang.d_game.entity.ContentReport;
 import com.xiaoyang.d_game.mapper.ContentReportMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.ReportService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -42,7 +42,7 @@ public class ReportServiceImpl implements ReportService {
      * 创建举报。
      */
     public void create(ReportCreateReq req) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
@@ -90,7 +90,7 @@ public class ReportServiceImpl implements ReportService {
         report.setStatus(req.getHandled() ? HANDLED : DISMISSED);
         report.setHandleNote(req.getNote());
         // 处理人来自当前管理员登录态，用于后台追踪处理责任。
-        report.setHandlerId(UserContext.getUserId());
+        report.setHandlerId(CurrentUser.getUserId());
         contentReportMapper.updateById(report);
     }
 

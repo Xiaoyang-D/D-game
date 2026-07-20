@@ -4,6 +4,7 @@ import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.ResultCode;
 import com.xiaoyang.d_game.config.JwtProperties;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
@@ -14,9 +15,8 @@ import org.springframework.util.StringUtils;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -85,6 +85,8 @@ public class JwtUtil {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+        } catch (ExpiredJwtException e) {
+            throw new BizException(ResultCode.TOKEN_EXPIRED);
         } catch (Exception e) {
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
@@ -95,29 +97,33 @@ public class JwtUtil {
      *
      * <p>这里只接受 access token；同时会检查过期时间、subject 是否能转成用户 ID，并读取角色列表。</p>
      */
-    public UserContext toUserContext(String token) {
+    /** 解析并校验 access token，只允许访问令牌类型且必须包含 jti。 */
+    public Claims parseAccessToken(String token) {
         Claims claims = parseToken(token);
         if (!TOKEN_TYPE_ACCESS.equals(claims.get(CLAIM_TOKEN_TYPE, String.class))) {
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
-        if (claims.getExpiration().before(new Date())) {
+        if (claims.getExpiration() == null || claims.getExpiration().before(new Date())) {
             throw new BizException(ResultCode.TOKEN_EXPIRED);
         }
-        UserContext context = new UserContext();
+        getUserId(claims);
+        if (claims.getId() == null || claims.getId().isBlank()) {
+            throw new BizException(ResultCode.TOKEN_INVALID);
+        }
+        return claims;
+    }
+
+    /** 从 JWT subject 读取用户 ID，并拒绝空值或非法数字。 */
+    public Long getUserId(Claims claims) {
         String subject = claims.getSubject();
         if (!StringUtils.hasText(subject)) {
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
         try {
-            context.setUserId(Long.valueOf(subject));
+            return Long.valueOf(subject);
         } catch (NumberFormatException e) {
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
-        context.setUsername(claims.get("username", String.class));
-        @SuppressWarnings("unchecked")
-        List<String> roles = claims.get("roles", List.class);
-        context.setRoles(roles == null ? new HashSet<>() : new HashSet<>(roles));
-        return context;
     }
 
     /**
@@ -130,6 +136,7 @@ public class JwtUtil {
         Date expireDate = new Date(now.getTime() + expireMs);
         return Jwts.builder()
                 .subject(String.valueOf(userId))
+                .id(UUID.randomUUID().toString())
                 .claim("username", username)
                 .claim("roles", roles)
                 .claim(CLAIM_TOKEN_TYPE, tokenType)

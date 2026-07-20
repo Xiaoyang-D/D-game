@@ -11,7 +11,7 @@ import com.xiaoyang.d_game.dto.GameResp;
 import com.xiaoyang.d_game.entity.GameCategory;
 import com.xiaoyang.d_game.entity.Tag;
 import com.xiaoyang.d_game.security.RequireLogin;
-import com.xiaoyang.d_game.security.RequireRole;
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.xiaoyang.d_game.service.GameService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -103,7 +103,7 @@ public class GameController {
      *
      * <p>仅管理员可调用，创建游戏时可以同时写入游戏与标签关联。</p>
      */
-    @RequireRole("ADMIN")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "创建游戏")
     @PostMapping
     public Result<Long> create(@Valid @RequestBody GameCreateReq req) {

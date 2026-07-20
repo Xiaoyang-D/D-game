@@ -27,4 +27,7 @@ public interface AuthService {
      * 使用 refresh token 换取新的 access/refresh token。
      */
     TokenResp refresh(RefreshTokenReq req);
+
+    /** 注销当前 access token，并注销同一用户提交的 refresh token。 */
+    void logout(String accessToken, RefreshTokenReq req);
 }

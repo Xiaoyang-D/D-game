@@ -6,7 +6,7 @@ import com.xiaoyang.d_game.dto.CheckInResultResp;
 import com.xiaoyang.d_game.dto.CheckInRewardResp;
 import com.xiaoyang.d_game.dto.CheckInStatusResp;
 import com.xiaoyang.d_game.repository.CheckInBitmapRepository;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.CheckInService;
 import com.xiaoyang.d_game.service.GrowthService;
 import lombok.RequiredArgsConstructor;
@@ -80,7 +80,7 @@ public class CheckInServiceImpl implements CheckInService {
      * 获取当前登录用户 ID。
      */
     private Long currentUserId() {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }

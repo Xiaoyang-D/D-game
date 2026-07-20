@@ -6,7 +6,7 @@ import com.xiaoyang.d_game.config.FileProperties;
 import com.xiaoyang.d_game.dto.FileResp;
 import com.xiaoyang.d_game.entity.FileRecord;
 import com.xiaoyang.d_game.mapper.FileRecordMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.FileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +50,7 @@ public class FileServiceImpl implements FileService {
      * 上传文件。
      */
     public FileResp upload(MultipartFile file) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }

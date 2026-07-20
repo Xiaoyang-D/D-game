@@ -3,6 +3,10 @@ package com.xiaoyang.d_game.common;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -18,6 +22,25 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  * 业务异常返回业务错误码；参数异常返回明确的字段校验提示；未预期异常记录完整日志并返回通用系统错误。</p>
  */
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(AuthenticationException.class)
+    @ResponseStatus(HttpStatus.OK)
+    /** 处理方法安全或过滤链抛出的认证失败，统一返回未登录业务码。 */
+    public Result<Void> handleAuthenticationException(AuthenticationException e) {
+        return Result.fail(ResultCode.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.OK)
+    /** 区分匿名访问和已登录越权，分别返回 401 或 403。 */
+    public Result<Void> handleAccessDeniedException(AccessDeniedException e) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()
+                || "anonymousUser".equals(authentication.getPrincipal())) {
+            return Result.fail(ResultCode.UNAUTHORIZED);
+        }
+        return Result.fail(ResultCode.FORBIDDEN);
+    }
 
     /**
      * 处理业务异常。

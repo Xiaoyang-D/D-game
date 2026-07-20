@@ -14,12 +14,13 @@ import com.xiaoyang.d_game.entity.UserRoleRel;
 import com.xiaoyang.d_game.mapper.SysRoleMapper;
 import com.xiaoyang.d_game.mapper.UserRoleRelMapper;
 import com.xiaoyang.d_game.security.JwtUtil;
+import com.xiaoyang.d_game.security.TokenRevocationService;
 import com.xiaoyang.d_game.service.AuthService;
 import com.xiaoyang.d_game.service.UserService;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -43,9 +44,10 @@ public class AuthServiceImpl implements AuthService {
     private final UserService userService;
     private final UserRoleRelMapper userRoleRelMapper;
     private final SysRoleMapper sysRoleMapper;
-    private final BCryptPasswordEncoder passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final JwtProperties jwtProperties;
+    private final TokenRevocationService tokenRevocationService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -121,7 +123,10 @@ public class AuthServiceImpl implements AuthService {
         if (!JwtUtil.TOKEN_TYPE_REFRESH.equals(claims.get(JwtUtil.CLAIM_TOKEN_TYPE, String.class))) {
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
-        Long userId = Long.valueOf(claims.getSubject());
+        if (claims.getId() == null || claims.getId().isBlank() || tokenRevocationService.isRevoked(claims.getId())) {
+            throw new BizException(ResultCode.TOKEN_INVALID);
+        }
+        Long userId = jwtUtil.getUserId(claims);
         User user = userService.getById(userId);
         if (user == null) {
             log.debug("刷新 Token 失败, 用户不存在, userId={}", userId);
@@ -130,6 +135,23 @@ public class AuthServiceImpl implements AuthService {
         userService.checkUserAvailable(user);
         log.debug("刷新 Token 成功, userId={}, username={}", user.getId(), user.getUsername());
         return buildTokenResp(user);
+    }
+
+    @Override
+    public void logout(String accessToken, RefreshTokenReq req) {
+        Claims accessClaims = jwtUtil.parseAccessToken(accessToken);
+        if (tokenRevocationService.isRevoked(accessClaims.getId())) {
+            throw new BizException(ResultCode.TOKEN_INVALID);
+        }
+        Claims refreshClaims = jwtUtil.parseToken(req.getRefreshToken());
+        if (!JwtUtil.TOKEN_TYPE_REFRESH.equals(refreshClaims.get(JwtUtil.CLAIM_TOKEN_TYPE, String.class))
+                || !accessClaims.getSubject().equals(refreshClaims.getSubject())
+                || refreshClaims.getId() == null || refreshClaims.getId().isBlank()
+                || tokenRevocationService.isRevoked(refreshClaims.getId())) {
+            throw new BizException(ResultCode.TOKEN_INVALID);
+        }
+        tokenRevocationService.revoke(accessClaims);
+        tokenRevocationService.revoke(refreshClaims);
     }
 
     /**

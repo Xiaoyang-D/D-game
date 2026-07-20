@@ -10,7 +10,7 @@ import com.xiaoyang.d_game.dto.UserGrowthResp;
 import com.xiaoyang.d_game.dto.UserProfileResp;
 import com.xiaoyang.d_game.dto.UserResp;
 import com.xiaoyang.d_game.security.RequireLogin;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.GrowthService;
 import com.xiaoyang.d_game.service.PostService;
 import com.xiaoyang.d_game.service.UserService;
@@ -62,7 +62,7 @@ public class UserController {
     @Operation(summary = "获取当前用户成长信息")
     @GetMapping("/me/growth")
     public Result<UserGrowthResp> growth() {
-        return Result.success(growthService.getUserGrowth(UserContext.getUserId()));
+        return Result.success(growthService.getUserGrowth(CurrentUser.getUserId()));
     }
 
     @RequireLogin

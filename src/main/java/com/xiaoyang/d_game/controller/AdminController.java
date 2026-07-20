@@ -10,7 +10,7 @@ import com.xiaoyang.d_game.dto.BatchAuditReq;
 import com.xiaoyang.d_game.dto.BannedAuthorPostQueryReq;
 import com.xiaoyang.d_game.dto.PostResp;
 import com.xiaoyang.d_game.entity.SysRole;
-import com.xiaoyang.d_game.security.RequireRole;
+import org.springframework.security.access.prepost.PreAuthorize;
 import com.xiaoyang.d_game.service.AdminService;
 import com.xiaoyang.d_game.service.PostService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,7 +36,7 @@ import java.util.List;
  * Controller 只做路由和参数绑定，真正的状态流转、通知发送和审计日志写入由 {@link AdminService} 完成。</p>
  */
 @Tag(name = "后台管理")
-@RequireRole("ADMIN")
+@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/v1/admin")
 @RequiredArgsConstructor

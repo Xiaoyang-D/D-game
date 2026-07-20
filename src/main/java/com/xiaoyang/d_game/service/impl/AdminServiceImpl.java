@@ -26,7 +26,7 @@ import com.xiaoyang.d_game.mapper.PostMapper;
 import com.xiaoyang.d_game.mapper.SysRoleMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserRoleRelMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.AdminService;
 import com.xiaoyang.d_game.service.NotificationService;
 import lombok.RequiredArgsConstructor;
@@ -98,7 +98,7 @@ public class AdminServiceImpl implements AdminService {
         post.setStatus(status);
         postMapper.updateById(post);
         writeAuditLog("AUDIT_POST", "POST", postId, req.getApproved() ? "审核通过" : "审核拒绝");
-        notificationService.sendNotification(post.getUserId(), UserContext.getUserId(),
+        notificationService.sendNotification(post.getUserId(), CurrentUser.getUserId(),
                 NotificationTypeEnum.AUDIT.getCode(), "帖子审核结果",
                 req.getApproved() ? "你的帖子已通过审核" : "你的帖子未通过审核",
                 TargetTypeEnum.POST.getCode(), postId);
@@ -269,7 +269,7 @@ public class AdminServiceImpl implements AdminService {
      */
     private void writeAuditLog(String action, String targetType, Long targetId, String detail) {
         AuditLog log = new AuditLog();
-        log.setOperatorId(UserContext.getUserId());
+        log.setOperatorId(CurrentUser.getUserId());
         log.setAction(action);
         log.setTargetType(targetType);
         log.setTargetId(targetId);

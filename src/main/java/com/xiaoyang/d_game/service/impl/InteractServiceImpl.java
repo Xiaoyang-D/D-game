@@ -25,7 +25,7 @@ import com.xiaoyang.d_game.mapper.UserFavoriteMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
 import com.xiaoyang.d_game.mapper.UserLikeMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.InteractService;
 import com.xiaoyang.d_game.service.NotificationService;
 import lombok.RequiredArgsConstructor;
@@ -448,7 +448,7 @@ public class InteractServiceImpl implements InteractService {
      * 获取当前登录用户 ID，未登录时统一抛业务异常。
      */
     private Long currentUserId() {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }

@@ -24,7 +24,7 @@ import com.xiaoyang.d_game.mapper.UserFavoriteMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserRoleRelMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -113,7 +113,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * 获取当前登录用户资料。
      */
     public UserResp getCurrentUserProfile() {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
@@ -128,7 +128,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      */
     public UserProfileResp getPublicProfile(Long userId) {
         User user = getRequiredUser(userId);
-        Long currentUserId = UserContext.getUserId();
+        Long currentUserId = CurrentUser.getOptionalUserId();
         boolean isSelf = currentUserId != null && Objects.equals(currentUserId, userId);
         boolean isAdmin = isCurrentUserAdmin();
         if (Objects.equals(user.getStatus(), UserStatusEnum.BANNED.getCode()) && !isSelf && !isAdmin) {
@@ -163,7 +163,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      */
     public PageResult<UserFavoriteResp> pagePublicFavorites(Long userId, Long page, Long size) {
         User user = getRequiredUser(userId);
-        Long currentUserId = UserContext.getUserId();
+        Long currentUserId = CurrentUser.getOptionalUserId();
         boolean isSelf = currentUserId != null && Objects.equals(currentUserId, userId);
         boolean isAdmin = isCurrentUserAdmin();
         if (Objects.equals(user.getStatus(), UserStatusEnum.BANNED.getCode()) && !isSelf && !isAdmin) {
@@ -191,7 +191,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * 更新当前登录用户资料，并校验邮箱和手机号唯一性。
      */
     public UserResp updateProfile(UpdateProfileReq req) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
@@ -221,8 +221,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * 判断当前访问者是否具有管理员角色。
      */
     private boolean isCurrentUserAdmin() {
-        UserContext context = UserContext.get();
-        return context != null && context.hasRole("ADMIN");
+        return CurrentUser.hasRole("ADMIN");
     }
 
     /**

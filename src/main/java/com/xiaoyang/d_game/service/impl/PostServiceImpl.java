@@ -39,7 +39,7 @@ import com.xiaoyang.d_game.mapper.PostTopicMapper;
 import com.xiaoyang.d_game.mapper.PostTopicRelMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
-import com.xiaoyang.d_game.security.UserContext;
+import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.PostService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -96,10 +96,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         }
         if (req.getAuthorId() != null) {
             User author = userMapper.selectById(req.getAuthorId());
-            Long currentUserId = UserContext.getUserId();
-            UserContext context = UserContext.get();
+            Long currentUserId = CurrentUser.getOptionalUserId();
             boolean isAuthor = currentUserId != null && Objects.equals(currentUserId, req.getAuthorId());
-            boolean isAdmin = context != null && context.hasRole("ADMIN");
+            boolean isAdmin = CurrentUser.hasRole("ADMIN");
             if (author == null || (Objects.equals(author.getStatus(), UserStatusEnum.BANNED.getCode())
                     && !isAuthor && !isAdmin)) {
                 return emptyPageResult(req.getPage(), req.getSize());
@@ -204,7 +203,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
      * 查询当前用户自己的帖子。
      */
     public PageResult<PostResp> pageMyPosts(Long page, Long size) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
@@ -292,7 +291,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
      * 查询关注用户的公开帖子。
      */
     public PageResult<PostResp> pageFollowingPosts(Long page, Long size) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
@@ -329,10 +328,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
             throw new BizException(ResultCode.POST_NOT_FOUND);
         }
         if (!Objects.equals(post.getStatus(), ContentStatusEnum.APPROVED.getCode())) {
-            Long currentUserId = UserContext.getUserId();
-            UserContext context = UserContext.get();
+            Long currentUserId = CurrentUser.getOptionalUserId();
             boolean isAuthor = currentUserId != null && Objects.equals(currentUserId, post.getUserId());
-            boolean isAdmin = context != null && context.hasRole("ADMIN");
+            boolean isAdmin = CurrentUser.hasRole("ADMIN");
             // 未通过审核的内容不对外公开，避免普通用户绕过列表直接访问详情。
             if (!isAuthor && !isAdmin) {
                 throw new BizException(ResultCode.FORBIDDEN, "帖子未通过审核");
@@ -355,7 +353,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
      * <p>新帖默认进入待审核状态，正文先经过富文本清洗再入库。</p>
      */
     public String createPost(PostCreateReq req) {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
@@ -532,7 +530,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     private Long currentUserId() {
-        Long userId = UserContext.getUserId();
+        Long userId = CurrentUser.getUserId();
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
