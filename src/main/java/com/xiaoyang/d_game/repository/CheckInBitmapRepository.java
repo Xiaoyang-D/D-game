@@ -46,16 +46,13 @@ public class CheckInBitmapRepository {
     /**
      * 标记用户完成指定日期签到。
      *
-     * <p>{@code setBit} 会返回旧值：如果旧值已经是 true，说明用户今天重复签到，应抛出业务异常。</p>
+     * <p>重复写入保持幂等，允许奖励失败后的补偿请求继续执行。</p>
      */
     public void markCheckedIn(Long userId, LocalDate date) {
         try {
             String key = bitmapKey(userId, date.getYear());
             long offset = dayOffset(date);
-            Boolean already = stringRedisTemplate.opsForValue().setBit(key, offset, true);
-            if (Boolean.TRUE.equals(already)) {
-                throw new BizException(ResultCode.ALREADY_CHECKED_IN);
-            }
+            stringRedisTemplate.opsForValue().setBit(key, offset, true);
             stringRedisTemplate.expire(key, KEY_TTL);
         } catch (BizException e) {
             throw e;

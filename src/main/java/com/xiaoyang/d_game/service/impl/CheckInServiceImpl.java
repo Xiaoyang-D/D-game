@@ -9,6 +9,7 @@ import com.xiaoyang.d_game.repository.CheckInBitmapRepository;
 import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.CheckInService;
 import com.xiaoyang.d_game.service.GrowthService;
+import com.xiaoyang.d_game.service.CheckInRewardRecovery;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,7 +28,7 @@ import java.time.LocalDate;
 public class CheckInServiceImpl implements CheckInService {
 
     private final CheckInBitmapRepository checkInBitmapRepository;
-    private final GrowthService growthService;
+    private final CheckInRewardRecovery rewardRecovery;
 
     @Override
     /**
@@ -41,6 +42,7 @@ public class CheckInServiceImpl implements CheckInService {
 
         CheckInStatusResp resp = new CheckInStatusResp();
         resp.setCheckedInToday(checkedInToday);
+        resp.setRewardPending(rewardRecovery.isPending(userId, today));
         // 如果今天还没签到，连续天数应从昨天开始算；否则从今天开始算。
         resp.setStreakDays(checkInBitmapRepository.calcStreak(userId,
                 checkedInToday ? today : today.minusDays(1)));
@@ -54,17 +56,17 @@ public class CheckInServiceImpl implements CheckInService {
     /**
      * 执行今日签到。
      *
-     * <p>markCheckedIn 会利用 Redis setBit 的旧值判断重复签到；成功后再计算连续天数并发奖励。</p>
+     * <p>先持久化任务，再幂等签到和发奖励；失败任务由用户重试或后台补偿。</p>
      */
     public CheckInResultResp checkIn() {
         Long userId = currentUserId();
         LocalDate today = CheckInBitmapRepository.today();
         log.debug("开始每日签到, userId={}, date={}", userId, today);
-        checkInBitmapRepository.markCheckedIn(userId, today);
+        rewardRecovery.enqueue(userId, today);
+        CheckInRewardResp reward = rewardRecovery.complete(userId, today);
 
         // 签到成功后再计算连续天数，此时今天已经被写入 Bitmap。
         int streakDays = checkInBitmapRepository.calcStreak(userId, today);
-        CheckInRewardResp reward = growthService.onCheckInSuccess(userId, today, streakDays);
 
         CheckInResultResp resp = new CheckInResultResp();
         resp.setCheckInDate(today);
