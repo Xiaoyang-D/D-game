@@ -45,6 +45,14 @@ public class AdminController {
     private final AdminService adminService;
     private final PostService postService;
 
+    @Operation(summary = "帖子管理列表")
+    @GetMapping("/posts")
+    public Result<PageResult<PostResp>> moderationPosts(@RequestParam(defaultValue = "1") Long page,
+                                                       @RequestParam(defaultValue = "10") Long size,
+                                                       @RequestParam(required = false) Integer status) {
+        return Result.success(postService.pageModerationPosts(page, size, status));
+    }
+
     /**
      * 查询所有待审核帖子。
      *

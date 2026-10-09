@@ -80,6 +80,10 @@ SPRING_PROFILES_ACTIVE=prod ./mvnw spring-boot:run
 
 ## 主要环境变量
 
+本地前端支持 `http://localhost:5173` 和 `http://127.0.0.1:5173`，开发及测试配置默认同时允许这两个来源。如果 IDE、系统环境或 Docker `.env` 中设置了 `CORS_ALLOWED_ORIGINS`，该值会覆盖默认配置；本地运行请使用 `http://localhost:5173,http://127.0.0.1:5173`。修改后重启后端。生产环境请明确填写实际前端来源，不使用通配符。
+
+登录接口返回 HTTP 403 且响应为 `Invalid CORS request` 时，检查浏览器请求的 `Origin` 是否在上述白名单中。`localhost` 和 `127.0.0.1` 是不同来源；即使请求通过 Vite 代理，原始 `Origin` 仍可能被转发给后端。
+
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `SPRING_PROFILES_ACTIVE` | 配置环境 | dev（Docker Compose 默认 prod） |
@@ -137,3 +141,13 @@ Docker Compose 启动前可复制 `.env.example` 为 `.env`，并填写数据库
 - 通知：`GET /api/v1/notifications` `/unread-count`，`PUT /api/v1/notifications/{id}/read` `/read-all`
 - 后台：`/api/v1/admin/**`（封禁、审核、角色，需 ADMIN 角色）
 - 文件：`POST /api/v1/files/upload`
+
+帖子即时发布、草稿发布和到期定时发布均自动公开。管理员在帖子管理中通过
+`GET /api/v1/admin/posts` 查看已提交帖子，调用原 `POST /api/v1/admin/posts/{id}/audit`
+接口进行封禁（approved=false）或解封（approved=true）。封禁沿用状态 3，不需要数据库迁移；
+作者修改封禁帖子不会恢复公开。历史状态 1 的帖子仍可在后台单独处理。
+
+游戏版区使用论坛、官方、攻略、互助、同人、COS 六个共享分区；帖子通过 gameId + boardId
+组合筛选。“推荐”是当前游戏全分区的点赞排序流（recommended=true），不作为发帖分类。
+官方分区仅管理员可发布，包括草稿和定时发布。已有数据库的分区升级脚本是本地 V8，
+保留原版块 ID 和帖子关联。

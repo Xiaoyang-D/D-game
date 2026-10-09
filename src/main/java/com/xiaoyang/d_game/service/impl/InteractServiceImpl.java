@@ -283,17 +283,28 @@ public class InteractServiceImpl implements InteractService {
         if (followee == null) {
             throw new BizException(ResultCode.USER_NOT_FOUND);
         }
-        UserFollow existing = userFollowMapper.selectOne(new LambdaQueryWrapper<UserFollow>()
-                .eq(UserFollow::getFollowerId, userId)
-                .eq(UserFollow::getFolloweeId, followeeId)
-                .last("LIMIT 1"));
-        if (existing != null) {
-            throw new BizException(ResultCode.ALREADY_FOLLOWED);
+        lockFollower(userId);
+        int restored = userFollowMapper.restoreFollow(userId, followeeId);
+        if (restored == 0) {
+            UserFollow existing = userFollowMapper.selectOne(new LambdaQueryWrapper<UserFollow>()
+                    .eq(UserFollow::getFollowerId, userId)
+                    .eq(UserFollow::getFolloweeId, followeeId)
+                    .last("LIMIT 1"));
+            if (existing != null) {
+                return;
+            }
+            UserFollow relation = new UserFollow();
+            relation.setFollowerId(userId);
+            relation.setFolloweeId(followeeId);
+            try {
+                userFollowMapper.insert(relation);
+            } catch (org.springframework.dao.DuplicateKeyException exception) {
+                if (userFollowMapper.findActiveFollowForUpdate(userId, followeeId) != null) {
+                    return;
+                }
+                throw exception;
+            }
         }
-        UserFollow follow = new UserFollow();
-        follow.setFollowerId(userId);
-        follow.setFolloweeId(followeeId);
-        userFollowMapper.insert(follow);
         notificationService.sendNotification(followeeId, userId, NotificationTypeEnum.FOLLOW.getCode(),
                 "新增关注", "有人关注了你", null, null);
     }
@@ -305,14 +316,21 @@ public class InteractServiceImpl implements InteractService {
      */
     public void unfollow(Long followeeId) {
         Long userId = currentUserId();
+        lockFollower(userId);
         UserFollow existing = userFollowMapper.selectOne(new LambdaQueryWrapper<UserFollow>()
                 .eq(UserFollow::getFollowerId, userId)
                 .eq(UserFollow::getFolloweeId, followeeId)
                 .last("LIMIT 1"));
         if (existing == null) {
-            throw new BizException(ResultCode.NOT_FOLLOWED);
+            return;
         }
         userFollowMapper.deleteById(existing.getId());
+    }
+
+    /** 按关注者串行化关注和取消关注，避免不存在关系时并发插入产生间隙锁冲突。 */
+    private void lockFollower(Long userId) {
+        userMapper.selectOne(new LambdaQueryWrapper<User>()
+                .select(User::getId).eq(User::getId, userId).last("FOR UPDATE"));
     }
 
     /**

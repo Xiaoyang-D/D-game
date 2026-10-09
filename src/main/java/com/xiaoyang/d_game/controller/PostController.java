@@ -34,7 +34,7 @@ import java.util.List;
  * 帖子接口。
  *
  * <p>前台可浏览已审核通过的帖子、查看详情和排行榜；登录用户可查看自己的帖子、关注流和发帖。
- * 发帖后默认进入待审核状态，由后台审核通过后才会出现在公开列表中。</p>
+ * 发帖后自动公开，管理员可封禁或解封帖子。</p>
  */
 @Tag(name = "帖子")
 @RestController
@@ -78,7 +78,7 @@ public class PostController {
     @RequireLogin
     @Operation(summary = "更新我的已提交帖子")
     @PutMapping("/manage/{id}")
-    /** 更新帖子内容；非草稿状态会重新进入管理员审核队列。 */
+    /** 更新帖子内容；非草稿自动公开，封禁状态保持不变。 */
     public Result<PostManageItemResp> updateManagedPost(@PathVariable Long id,
                                                          @Valid @RequestBody PostPublishReq req) {
         return Result.success(postService.updateMyManagedPost(id, req));
@@ -203,7 +203,7 @@ public class PostController {
     /**
      * 创建帖子。
      *
-     * <p>服务层会校验版块和关联游戏是否存在，清洗富文本内容，并把新帖置为待审核。</p>
+     * <p>服务层会校验版块和关联游戏是否存在，清洗富文本内容，并把新帖置为公开。</p>
      */
     @RequireLogin
     @Operation(summary = "发帖")

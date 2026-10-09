@@ -41,6 +41,9 @@ public interface PostService extends IService<Post> {
      */
     PageResult<PostResp> pagePendingPosts(Long page, Long size);
 
+    /** 管理员查看已提交帖子，排除草稿，支持按状态筛选。 */
+    PageResult<PostResp> pageModerationPosts(Long page, Long size, Integer status);
+
     /**
      * 查询封禁作者发布过的帖子。
      */
@@ -57,7 +60,7 @@ public interface PostService extends IService<Post> {
     /** 查询当前用户可编辑的任意状态帖子。 */
     PostManageItemResp getMyManagedPost(Long postId);
 
-    /** 更新当前用户已提交的帖子；非草稿内容会重新进入审核。 */
+    /** 更新当前用户已提交的帖子；非草稿自动公开，封禁状态保持不变。 */
     PostManageItemResp updateMyManagedPost(Long postId, PostPublishReq req);
 
     /** 删除当前用户任意状态的帖子。 */
@@ -74,7 +77,7 @@ public interface PostService extends IService<Post> {
     PostResp getPostDetail(Long postId);
 
     /**
-     * 创建帖子，默认进入待审核状态。
+     * 创建帖子，默认自动公开。
      */
     String createPost(PostCreateReq req);
 

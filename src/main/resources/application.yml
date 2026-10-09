@@ -10,6 +10,9 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+  threads:
+    virtual:
+      enabled: true
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

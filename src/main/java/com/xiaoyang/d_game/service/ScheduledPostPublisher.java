@@ -13,11 +13,11 @@ public class ScheduledPostPublisher {
     private final PostService postService;
 
     @Scheduled(fixedDelayString = "${app.post.schedule.poll-interval-ms:60000}")
-    public void moveDuePostsToReview() {
+    public void publishScheduledPosts() {
         try {
             postService.publishDuePosts();
         } catch (RuntimeException exception) {
-            log.error("Failed to move scheduled posts to the review queue", exception);
+            log.error("Failed to publish scheduled posts", exception);
         }
     }
 }

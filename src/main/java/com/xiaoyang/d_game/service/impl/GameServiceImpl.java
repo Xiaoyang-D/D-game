@@ -303,9 +303,10 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
                 .in(GameTagRel::getGameId, gameIds));
         relations.forEach(rel -> tagIdsByGame.computeIfAbsent(rel.getGameId(), ignored -> new java.util.ArrayList<>())
                 .add(rel.getTagId()));
-        Map<Long, String> tagNames = tagMapper.selectBatchIds(relations.stream()
-                        .map(GameTagRel::getTagId).distinct().toList())
-                .stream().collect(Collectors.toMap(Tag::getId, Tag::getName));
+        List<Long> tagIds = relations.stream().map(GameTagRel::getTagId).distinct().toList();
+        Map<Long, String> tagNames = tagIds.isEmpty() ? Collections.emptyMap()
+                : tagMapper.selectBatchIds(tagIds).stream()
+                        .collect(Collectors.toMap(Tag::getId, Tag::getName));
 
         return games.stream().map(game -> toGameResp(game, categoryNames, tagIdsByGame, tagNames)).toList();
     }

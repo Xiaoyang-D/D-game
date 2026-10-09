@@ -1,6 +1,7 @@
 package com.xiaoyang.d_game.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.PageResult;
@@ -93,14 +94,26 @@ public class AdminServiceImpl implements AdminService {
         if (post == null) {
             throw new BizException(ResultCode.POST_NOT_FOUND);
         }
-        // approved=true 表示审核通过，否则标记为拒绝。
+        if (Objects.equals(post.getStatus(), ContentStatusEnum.DRAFT.getCode())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "草稿不能封禁或公开，请等待作者发布");
+        }
+        // 保留原接口兼容：approved=false 封禁，true 解封/通过历史待审核内容。
         int status = req.getApproved() ? ContentStatusEnum.APPROVED.getCode() : ContentStatusEnum.REJECTED.getCode();
-        post.setStatus(status);
-        postMapper.updateById(post);
-        writeAuditLog("AUDIT_POST", "POST", postId, req.getApproved() ? "审核通过" : "审核拒绝");
+        if (Objects.equals(post.getStatus(), status)) {
+            return;
+        }
+        int changed = postMapper.update(null, new LambdaUpdateWrapper<Post>()
+                .eq(Post::getId, postId).eq(Post::getStatus, post.getStatus()).set(Post::getStatus, status));
+        if (changed == 0) {
+            throw new BizException(ResultCode.BAD_REQUEST, "帖子状态已变化，请刷新后重试");
+        }
+        String reason = req.getReason() == null ? "" : req.getReason().trim();
+        writeAuditLog(req.getApproved() ? "UNBAN_POST" : "BAN_POST", "POST", postId,
+                (req.getApproved() ? "解封帖子" : "封禁帖子") + (reason.isEmpty() ? "" : ": " + reason));
         notificationService.sendNotification(post.getUserId(), CurrentUser.getUserId(),
-                NotificationTypeEnum.AUDIT.getCode(), "帖子审核结果",
-                req.getApproved() ? "你的帖子已通过审核" : "你的帖子未通过审核",
+                NotificationTypeEnum.AUDIT.getCode(), "帖子管理通知",
+                (req.getApproved() ? "你的帖子已恢复公开" : "你的帖子已被管理员封禁")
+                        + (reason.isEmpty() ? "" : "，原因：" + reason),
                 TargetTypeEnum.POST.getCode(), postId);
     }
 

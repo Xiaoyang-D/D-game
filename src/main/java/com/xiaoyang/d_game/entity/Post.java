@@ -13,7 +13,7 @@ import lombok.EqualsAndHashCode;
 /**
  * 帖子实体。
  *
- * <p>帖子属于某个版块，可选关联一个游戏；发帖后默认待审核，通过后进入公开列表。</p>
+ * <p>帖子属于某个版块，可选关联一个游戏；发帖后自动公开，管理员可事后封禁。</p>
  */
 public class Post extends BaseEntity {
 
@@ -40,7 +40,7 @@ public class Post extends BaseEntity {
     private Boolean containsAiGenerated = false;
 
     /** 帖子状态，取值见 {@link ContentStatusEnum}。 */
-    private Integer status = ContentStatusEnum.PENDING.getCode();
+    private Integer status = ContentStatusEnum.APPROVED.getCode();
 
     private java.time.LocalDateTime scheduledPublishAt;
 

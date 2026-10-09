@@ -111,7 +111,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (StringUtils.hasText(req.getKeyword())) {
             wrapper.like(Post::getTitle, req.getKeyword());
         }
-        wrapper.orderByDesc(Post::getGmtCreate);
+        if (Boolean.TRUE.equals(req.getRecommended())) {
+            wrapper.orderByDesc(Post::getLikeCount);
+        }
+        wrapper.orderByDesc(Post::getGmtCreate).orderByDesc(Post::getId);
         Page<Post> page = page(new Page<>(req.getPage(), req.getSize()), wrapper);
         List<PostResp> records = page.getRecords().stream().map(this::toPostResp).toList();
         PageResult<PostResp> result = new PageResult<>();
@@ -152,6 +155,27 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     /**
      * 查询待审核帖子。
      */
+    public PageResult<PostResp> pageModerationPosts(Long page, Long size, Integer status) {
+        if (status != null && !List.of(ContentStatusEnum.PENDING.getCode(),
+                ContentStatusEnum.APPROVED.getCode(), ContentStatusEnum.REJECTED.getCode()).contains(status)) {
+            throw new BizException(ResultCode.BAD_REQUEST, "无效的帖子状态");
+        }
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<Post>()
+                .in(Post::getStatus, ContentStatusEnum.PENDING.getCode(),
+                        ContentStatusEnum.APPROVED.getCode(), ContentStatusEnum.REJECTED.getCode())
+                .eq(status != null, Post::getStatus, status)
+                .orderByDesc(Post::getGmtCreate).orderByDesc(Post::getId);
+        Page<Post> result = page(new Page<>(page == null || page < 1 ? 1 : page,
+                size == null || size < 1 ? 10 : Math.min(size, 50)), wrapper);
+        PageResult<PostResp> response = new PageResult<>();
+        response.setPage(result.getCurrent());
+        response.setSize(result.getSize());
+        response.setTotal(result.getTotal());
+        response.setRecords(result.getRecords().stream().map(this::toPostResp).toList());
+        return response;
+    }
+
+    @Override
     public PageResult<PostResp> pagePendingPosts(Long page, Long size) {
         Page<Post> result = page(new Page<>(page, size), new LambdaQueryWrapper<Post>()
                 .eq(Post::getStatus, ContentStatusEnum.PENDING.getCode())
@@ -259,21 +283,29 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     /**
      * 更新管理页帖子。
      *
-     * <p>草稿保持草稿状态；已发布、审核中和未通过的内容修改后统一转为待审核。</p>
+     * <p>草稿保持草稿状态；已发布和历史待审核内容修改后自动公开；封禁内容继续保持封禁。</p>
      */
     public PostManageItemResp updateMyManagedPost(Long postId, PostPublishReq req) {
         Long userId = currentUserId();
         Post post = getRequiredManagedPost(postId, userId);
+        Integer originalStatus = post.getStatus();
         validatePublishRequest(req, userId);
         applyPublishFields(post, req, userId);
         if (Objects.equals(post.getStatus(), ContentStatusEnum.DRAFT.getCode())) {
             post.setStatus(ContentStatusEnum.DRAFT.getCode());
         } else {
-            // Revisions to submitted content must be reviewed again before becoming public.
-            post.setStatus(ContentStatusEnum.PENDING.getCode());
+            // 管理员封禁的帖子修改后仍保持封禁，作者不能绕过管理操作。
+            if (!Objects.equals(post.getStatus(), ContentStatusEnum.REJECTED.getCode())) {
+                post.setStatus(ContentStatusEnum.APPROVED.getCode());
+            }
             post.setScheduledPublishAt(null);
         }
-        updateById(post);
+        boolean updated = update(post, new LambdaUpdateWrapper<Post>()
+                .eq(Post::getId, postId).eq(Post::getUserId, userId)
+                .eq(Post::getStatus, originalStatus));
+        if (!updated) {
+            throw new BizException(ResultCode.BAD_REQUEST, "帖子状态已变化，请刷新后重试");
+        }
         replaceTopics(post.getId(), req.getTopicNames());
         return toManageItemResp(post);
     }
@@ -333,7 +365,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
             boolean isAdmin = CurrentUser.hasRole("ADMIN");
             // 未通过审核的内容不对外公开，避免普通用户绕过列表直接访问详情。
             if (!isAuthor && !isAdmin) {
-                throw new BizException(ResultCode.FORBIDDEN, "帖子未通过审核");
+                throw new BizException(ResultCode.FORBIDDEN, "帖子未公开或已被封禁");
             }
         }
         // 数据库原子自增真实浏览数，再同步内存对象，保证返回值也是最新浏览数。
@@ -350,7 +382,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     /**
      * 创建帖子。
      *
-     * <p>新帖默认进入待审核状态，正文先经过富文本清洗再入库。</p>
+     * <p>新帖默认自动通过并公开展示，正文先经过富文本清洗再入库。</p>
      */
     public String createPost(PostCreateReq req) {
         Long userId = CurrentUser.getUserId();
@@ -363,17 +395,18 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
         }
+        validateOfficialBoard(board);
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
-        // 帖子不直接公开，避免垃圾内容绕过审核进入社区首页。
+        // 帖子自动通过，违规内容由管理员事后封禁。
         Post post = new Post();
         post.setBoardId(req.getBoardId());
         post.setGameId(req.getGameId());
         post.setUserId(userId);
         post.setTitle(req.getTitle());
         post.setContent(htmlSanitizer.sanitizePostContent(req.getContent()));
-        post.setStatus(ContentStatusEnum.PENDING.getCode());
+        post.setStatus(ContentStatusEnum.APPROVED.getCode());
         save(post);
         log.debug("创建帖子成功, postId={}, userId={}, status={}", post.getId(), userId, post.getStatus());
         return String.valueOf(post.getId());
@@ -387,7 +420,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         Post post = new Post();
         applyPublishFields(post, req, userId);
         post.setStatus(req.getScheduledPublishAt() == null
-                ? ContentStatusEnum.PENDING.getCode()
+                ? ContentStatusEnum.APPROVED.getCode()
                 : ContentStatusEnum.DRAFT.getCode());
         save(post);
         replaceTopics(post.getId(), req.getTopicNames());
@@ -464,7 +497,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         validatePublishRequest(req, userId);
         applyPublishFields(post, req, userId);
         post.setStatus(req.getScheduledPublishAt() == null
-                ? ContentStatusEnum.PENDING.getCode()
+                ? ContentStatusEnum.APPROVED.getCode()
                 : ContentStatusEnum.DRAFT.getCode());
         updateById(post);
         replaceTopics(post.getId(), req.getTopicNames());
@@ -524,7 +557,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
             update(new LambdaUpdateWrapper<Post>()
                     .eq(Post::getId, post.getId())
                     .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
-                    .set(Post::getStatus, ContentStatusEnum.PENDING.getCode())
+                    .set(Post::getStatus, ContentStatusEnum.APPROVED.getCode())
                     .set(Post::getScheduledPublishAt, null));
         }
     }
@@ -574,6 +607,13 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     private void validateDraftFields(PostDraftSaveReq req) {
+        if (req.getBoardId() != null) {
+            Board board = boardMapper.selectById(req.getBoardId());
+            if (board == null) {
+                throw new BizException(ResultCode.BOARD_NOT_FOUND);
+            }
+            validateOfficialBoard(board);
+        }
         if (req.getTitle() != null && req.getTitle().length() > 40) {
             throw new BizException(ResultCode.BAD_REQUEST, "标题长度不能超过40");
         }
@@ -590,9 +630,11 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (req.getTitle().trim().length() > 40 || req.getContent().length() > 20000) {
             throw new BizException(ResultCode.BAD_REQUEST, "标题或正文超过长度限制");
         }
-        if (boardMapper.selectById(req.getBoardId()) == null) {
+        Board board = boardMapper.selectById(req.getBoardId());
+        if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
         }
+        validateOfficialBoard(board);
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
@@ -615,15 +657,23 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (req.getTitle().trim().length() > 40 || req.getContent().length() > 20000) {
             throw new BizException(ResultCode.BAD_REQUEST, "标题或正文超过长度限制");
         }
-        if (boardMapper.selectById(req.getBoardId()) == null) {
+        Board board = boardMapper.selectById(req.getBoardId());
+        if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
         }
+        validateOfficialBoard(board);
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
         validateCollectionOwner(req.getCollectionId(), userId);
         normalizeTopicNames(req.getTopicNames());
         validateSchedule(req.getScheduledPublishAt());
+    }
+
+    private void validateOfficialBoard(Board board) {
+        if ("官方".equals(board.getName()) && !CurrentUser.hasRole("ADMIN")) {
+            throw new BizException(ResultCode.FORBIDDEN, "官方分区仅管理员可以发布");
+        }
     }
 
     private void validateSchedule(LocalDateTime scheduledAt) {

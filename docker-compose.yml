@@ -76,7 +76,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a random value of at least 32 characters}
       JWT_COOKIE_SECURE: ${JWT_COOKIE_SECURE:false}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       FILE_UPLOAD_DIR: /app/uploads
       FILE_BASE_URL: http://localhost:8080/files
     ports:
@@ -84,7 +84,31 @@ services:
     volumes:
       - app_uploads:/app/uploads
 
+  agent:
+    build:
+      context: ../../game_agent
+    container_name: d_game_agent
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      D_GAME_API_URL: http://app:8080/api/v1
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?Set DASHSCOPE_API_KEY for the D-Game agent}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
+      AGENT_CORS_ORIGINS: ${AGENT_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      AGENT_DATABASE_PATH: /app/data/dgame-agent.sqlite3
+    ports:
+      - "8001:8001"
+    volumes:
+      - agent_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   mysql_data:
   rabbitmq_data:
   app_uploads:
+  agent_data:

@@ -8,6 +8,13 @@ import lombok.Data;
  */
 public class SearchQueryReq {
 
+    /** 可选游戏版区；指定时仅搜索该版区的公开帖子。 */
+    private Long gameId;
+    /** 分区筛选，例如攻略。 */
+    private Long boardId;
+    /** 最热排序按点赞量降序，默认最新。 */
+    private Boolean recommended = false;
+
     /** 搜索关键字。 */
     private String keyword;
 

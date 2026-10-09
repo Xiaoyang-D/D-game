@@ -31,7 +31,7 @@ public class SearchServiceImpl implements SearchService {
         SearchTypeEnum type = SearchTypeEnum.fromCode(req.getType());
         SearchResp resp = new SearchResp();
 
-        if (type == SearchTypeEnum.GAME || type == SearchTypeEnum.ALL) {
+        if (req.getGameId() == null && (type == SearchTypeEnum.GAME || type == SearchTypeEnum.ALL)) {
             // 复用游戏列表查询，保持分类补全、标签补全和分页结构一致。
             GameQueryReq gameReq = new GameQueryReq();
             gameReq.setKeyword(req.getKeyword());
@@ -43,6 +43,9 @@ public class SearchServiceImpl implements SearchService {
         if (type == SearchTypeEnum.POST || type == SearchTypeEnum.ALL) {
             // 复用公开帖子列表查询，确保未审核帖子不会被搜索出来。
             PostQueryReq postReq = new PostQueryReq();
+            postReq.setGameId(req.getGameId());
+            postReq.setBoardId(req.getBoardId());
+            postReq.setRecommended(req.getRecommended());
             postReq.setKeyword(req.getKeyword());
             postReq.setPage(req.getPage());
             postReq.setSize(req.getSize());
