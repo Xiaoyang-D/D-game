@@ -151,6 +151,29 @@ class PostModerationTest {
     }
 
     @Test
+    void replySortingKeepsScopeAndExcludesHiddenComments() {
+        PostServiceImpl service = spy(new PostServiceImpl(mock(BoardMapper.class), mock(GameMapper.class),
+                mock(UserMapper.class), mock(UserFollowMapper.class), mock(HtmlSanitizer.class),
+                mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class)));
+        doReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<Post>(1, 10))
+                .when(service).page(any(com.baomidou.mybatisplus.core.metadata.IPage.class), any(Wrapper.class));
+        var request = new com.xiaoyang.d_game.dto.PostQueryReq();
+        request.setGameId(100L);
+        request.setBoardId(2L);
+        request.setSort("LATEST_REPLY");
+        service.pagePosts(request);
+        var wrapper = ArgumentCaptor.forClass(Wrapper.class);
+        verify(service).page(any(com.baomidou.mybatisplus.core.metadata.IPage.class), wrapper.capture());
+        String sql = wrapper.getValue().getSqlSegment();
+        assertTrue(sql.contains("game_id"));
+        assertTrue(sql.contains("board_id"));
+        assertTrue(sql.contains("MAX(c.gmt_create)"));
+        assertTrue(sql.contains("c.is_deleted = 0 AND c.status = 2"));
+        assertTrue(sql.contains("post.gmt_create) DESC"));
+        assertFalse(sql.contains("like_count DESC"));
+    }
+
+    @Test
     void ordinaryUserCannotPublishOfficialPost() {
         BoardMapper boards = mock(BoardMapper.class);
         Board official = new Board();

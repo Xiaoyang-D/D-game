@@ -12,6 +12,11 @@ import com.xiaoyang.d_game.dto.TokenResp;
  * 用户状态校验以及 access/refresh token 签发。</p>
  */
 public interface AuthService {
+    void sendEmailCode(com.xiaoyang.d_game.dto.EmailAuthReq.SendCode req, String ip);
+    void resetPassword(com.xiaoyang.d_game.dto.EmailAuthReq.ResetPassword req);
+    com.xiaoyang.d_game.dto.EmailAuthReq.MigrationToken verifyMigration(com.xiaoyang.d_game.dto.EmailAuthReq.VerifyMigration req, String ip);
+    void sendMigrationCode(com.xiaoyang.d_game.dto.EmailAuthReq.MigrationEmail req, String ip);
+    TokenResp bindMigration(com.xiaoyang.d_game.dto.EmailAuthReq.BindMigration req);
 
     /**
      * 注册新用户并返回登录令牌。
@@ -19,7 +24,7 @@ public interface AuthService {
     TokenResp register(RegisterReq req);
 
     /**
-     * 用户名密码登录并返回登录令牌。
+     * 邮箱密码登录并返回登录令牌。
      */
     TokenResp login(LoginReq req);
 

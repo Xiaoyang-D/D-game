@@ -40,7 +40,6 @@ logs/
 ### Local environment and secrets ###
 .env
 .env.*
-!.env.example
 src/main/resources/application-local.yml
 src/main/resources/application-local.yaml
 src/main/resources/application-dev.yml
@@ -57,3 +56,22 @@ src/main/resources/application-secret.yaml
 *.jks
 *.crt
 *.cer
+
+# Never publish runtime configuration, SQL or secrets
+.env*
+*.sql
+*.sql.*
+application*.yml
+application*.yaml
+application*.properties
+docker-compose*.yml
+docker-compose*.yaml
+compose*.yml
+compose*.yaml
+/config/
+secrets/
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore

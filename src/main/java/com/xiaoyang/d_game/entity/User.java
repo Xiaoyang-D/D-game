@@ -26,6 +26,12 @@ public class User extends BaseEntity {
     /** 邮箱，可为空但填写后唯一。 */
     private String email;
 
+    /** 邮箱归属验证时间；历史邮箱默认未验证。 */
+    private java.time.LocalDateTime emailVerifiedAt;
+
+    /** 认证版本，密码重置和迁移后递增。 */
+    private Integer authVersion;
+
     /** 手机号，可为空但填写后唯一。 */
     private String mobile;
 

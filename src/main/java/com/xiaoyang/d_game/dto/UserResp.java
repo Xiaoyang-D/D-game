@@ -25,6 +25,8 @@ public class UserResp {
     /** 邮箱。 */
     private String email;
 
+    private LocalDateTime emailVerifiedAt;
+
     /** 手机号。 */
     private String mobile;
 

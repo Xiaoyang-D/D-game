@@ -111,10 +111,18 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (StringUtils.hasText(req.getKeyword())) {
             wrapper.like(Post::getTitle, req.getKeyword());
         }
-        if (Boolean.TRUE.equals(req.getRecommended())) {
-            wrapper.orderByDesc(Post::getLikeCount);
+        if ("LATEST_REPLY".equals(req.getSort())) {
+            // 固定 SQL，不拼接请求参数；只考虑公开且未删除的评论。
+            wrapper.last("ORDER BY COALESCE((SELECT MAX(c.gmt_create) FROM comment c "
+                    + "WHERE c.post_id = post.id AND c.is_deleted = 0 AND c.status = 2), "
+                    + "post.gmt_create) DESC, post.gmt_create DESC, post.id DESC");
+        } else {
+            if ("DEFAULT".equals(req.getSort())
+                    || (req.getSort() == null && Boolean.TRUE.equals(req.getRecommended()))) {
+                wrapper.orderByDesc(Post::getLikeCount);
+            }
+            wrapper.orderByDesc(Post::getGmtCreate).orderByDesc(Post::getId);
         }
-        wrapper.orderByDesc(Post::getGmtCreate).orderByDesc(Post::getId);
         Page<Post> page = page(new Page<>(req.getPage(), req.getSize()), wrapper);
         List<PostResp> records = page.getRecords().stream().map(this::toPostResp).toList();
         PageResult<PostResp> result = new PageResult<>();

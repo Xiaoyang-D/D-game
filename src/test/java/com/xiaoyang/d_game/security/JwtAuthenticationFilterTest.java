@@ -32,7 +32,7 @@ class JwtAuthenticationFilterTest {
     @BeforeEach
     void setUp() {
         JwtProperties properties = new JwtProperties();
-        properties.setSecret("test-secret-that-is-long-enough-for-hs256");
+        properties.setSecret("unit-test-only-signing-key-never-use-in-production-2026");
         properties.setAccessExpireMs(3_600_000L);
         properties.setRefreshExpireMs(86_400_000L);
         jwtUtil = new JwtUtil(properties);
@@ -52,7 +52,9 @@ class JwtAuthenticationFilterTest {
         User user = new User();
         user.setId(7L);
         user.setUsername("admin");
-        String token = jwtUtil.generateAccessToken(7L, "admin", List.of("ADMIN"));
+        user.setAuthVersion(1);
+        user.setEmailVerifiedAt(java.time.LocalDateTime.now());
+        String token = jwtUtil.generateAccessToken(7L, "admin", List.of("ADMIN"), 1);
         when(userService.getById(7L)).thenReturn(user);
         when(userService.listRoleCodes(7L)).thenReturn(List.of("ADMIN"));
         when(revocationService.isRevoked(any())).thenReturn(false);
@@ -79,5 +81,29 @@ class JwtAuthenticationFilterTest {
 
         assertEquals(200, response.getStatus());
         verify(chain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    void staleVersionAndLegacyTokensAreRejected() throws Exception {
+        User user = new User(); user.setId(7L); user.setAuthVersion(2);
+        user.setEmailVerifiedAt(java.time.LocalDateTime.now());
+        when(userService.getById(7L)).thenReturn(user);
+        for (String token : List.of(jwtUtil.generateAccessToken(7L, "admin", List.of(), 1),
+                jwtUtil.generateAccessToken(7L, "admin", List.of()))) {
+            FilterChain chain = Mockito.mock(FilterChain.class);
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.addHeader("Authorization", "Bearer " + token);
+            filter.doFilter(request, new MockHttpServletResponse(), chain);
+            verify(chain, never()).doFilter(any(), any());
+        }
+    }
+
+    @Test
+    void staleBearerDoesNotBlockPublicMigrationEntry() throws Exception {
+        FilterChain chain = Mockito.mock(FilterChain.class);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/migration/verify");
+        request.addHeader("Authorization", "Bearer invalid");
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+        verify(chain).doFilter(any(), any());
     }
 }

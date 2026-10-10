@@ -11,6 +11,9 @@ public class PostQueryReq {
     /** 推荐流按点赞量降序，普通分区按发布时间降序。 */
     private Boolean recommended = false;
 
+    /** 排序方式：DEFAULT、LATEST、LATEST_REPLY；未传时保留原有排序。 */
+    private String sort;
+
     /** 鐗堝潡 ID 绛涢€夈€?*/
     private Long boardId;
 

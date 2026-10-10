@@ -38,6 +38,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        if (java.util.Set.of("/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh",
+                "/api/v1/auth/email/code", "/api/v1/auth/password/reset", "/api/v1/auth/migration/verify",
+                "/api/v1/auth/migration/email/code", "/api/v1/auth/migration/bind").contains(request.getRequestURI())) {
+            filterChain.doFilter(request, response); return;
+        }
         String token = resolveBearerToken(request);
         if (!StringUtils.hasText(token)) {
             filterChain.doFilter(request, response);
@@ -54,6 +59,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 throw new BizException(com.xiaoyang.d_game.common.ResultCode.UNAUTHORIZED);
             }
             userService.checkUserAvailable(user);
+            jwtUtil.validateAuthVersion(claims, user);
             List<SimpleGrantedAuthority> authorities = userService.listRoleCodes(userId).stream()
                     .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role))
                     .toList();

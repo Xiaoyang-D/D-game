@@ -151,3 +151,17 @@ Docker Compose 启动前可复制 `.env.example` 为 `.env`，并填写数据库
 组合筛选。“推荐”是当前游戏全分区的点赞排序流（recommended=true），不作为发帖分类。
 官方分区仅管理员可发布，包括草稿和定时发布。已有数据库的分区升级脚本是本地 V8，
 保留原版块 ID 和帖子关联。
+
+## 邮箱认证
+
+注册使用邮箱、邮件验证码、密码和昵称，日常登录仅接受已验证邮箱和密码。旧账号通过前端 `/account-migration` 验证原用户名密码并绑定邮箱；支持 `/forgot-password` 验证码重置密码，重置后旧 JWT 全部失效。
+
+QQ 发信配置为 `MAIL_USERNAME`（发件邮箱）和 `MAIL_AUTH_CODE`（SMTP 授权码），运行配置、环境变量文件及 SQL 仅在本地保存，不纳入 Git。本地启动前需把变量注入进程；Spring Boot 不会自动加载 `.env`。接收邮箱不限 QQ。SMTP 配置使用 TLS 和有限超时，不输出验证码。
+
+旧库备份并停止写入后人工执行 `src/main/resources/db/migrations/V9__email_auth.sql`，先处理邮箱规范化冲突。全新 schema 已包含字段，不重复执行。初始化管理员必须验证绑定邮箱并重置为独立强密码。详细接口见 `docs/API.md`，上线步骤见项目根目录 `DEPLOYMENT.md`。
+
+Redis 脚本集成验证：`python scripts/verify_email_auth_redis.py`，仅使用随机测试键并自动清理，不扫描或清空数据库。Java 单元测试 mock 发信组件，不会发送真实邮件。
+
+## 提交排除规则
+
+禁止提交运行配置（application 配置、环境变量文件、Docker Compose）、SQL、邮箱地址与 SMTP 授权码、密钥、日志及备份。构建清单和不含凭据的配置绑定 Java 源码仍正常维护。已跟踪的运行配置和 SQL 已取消跟踪，本地文件保留。历史提交不在本次改写范围内。

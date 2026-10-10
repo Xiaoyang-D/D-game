@@ -64,7 +64,11 @@ public class AdminServiceImpl implements AdminService {
      * 封禁用户。
      */
     public void banUser(Long userId) {
-        User user = requireUser(userId);
+        requireUser(userId);
+        User user = new User();
+        user.setId(userId);
+        user.setNickname(null);
+        user.setBio(null);
         user.setStatus(UserStatusEnum.BANNED.getCode());
         userMapper.updateById(user);
         writeAuditLog("BAN_USER", "USER", userId, "封禁用户");
@@ -76,7 +80,11 @@ public class AdminServiceImpl implements AdminService {
      * 解封用户。
      */
     public void unbanUser(Long userId) {
-        User user = requireUser(userId);
+        requireUser(userId);
+        User user = new User();
+        user.setId(userId);
+        user.setNickname(null);
+        user.setBio(null);
         user.setStatus(UserStatusEnum.NORMAL.getCode());
         userMapper.updateById(user);
         writeAuditLog("UNBAN_USER", "USER", userId, "解封用户");

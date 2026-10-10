@@ -131,7 +131,23 @@ public class JwtUtil {
      *
      * <p>subject 固定使用用户 ID，其他展示和权限信息放在 claim 中；过期时间按传入 token 类型分别控制。</p>
      */
+    public String generateAccessToken(Long userId, String username, List<String> roles, Integer version) {
+        return buildToken(userId, username, roles, TOKEN_TYPE_ACCESS, jwtProperties.getAccessExpireMs(), version);
+    }
+    public String generateRefreshToken(Long userId, String username, List<String> roles, Integer version) {
+        return buildToken(userId, username, roles, TOKEN_TYPE_REFRESH, jwtProperties.getRefreshExpireMs(), version);
+    }
+    public void validateAuthVersion(Claims claims, com.xiaoyang.d_game.entity.User user) {
+        Object value = claims.get("authVersion");
+        if (user.getEmailVerifiedAt() == null || !(value instanceof Number)
+                || user.getAuthVersion() == null || ((Number) value).intValue() != user.getAuthVersion()) {
+            throw new BizException(ResultCode.TOKEN_INVALID);
+        }
+    }
     private String buildToken(Long userId, String username, List<String> roles, String tokenType, long expireMs) {
+        return buildToken(userId, username, roles, tokenType, expireMs, null);
+    }
+    private String buildToken(Long userId, String username, List<String> roles, String tokenType, long expireMs, Integer version) {
         Date now = new Date();
         Date expireDate = new Date(now.getTime() + expireMs);
         return Jwts.builder()
@@ -139,6 +155,7 @@ public class JwtUtil {
                 .id(UUID.randomUUID().toString())
                 .claim("username", username)
                 .claim("roles", roles)
+                .claim("authVersion", version)
                 .claim(CLAIM_TOKEN_TYPE, tokenType)
                 .issuedAt(now)
                 .expiration(expireDate)

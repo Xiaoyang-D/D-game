@@ -26,6 +26,40 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final com.xiaoyang.d_game.config.EmailAuthProperties emailProperties;
+
+    private String clientIp(jakarta.servlet.http.HttpServletRequest request) {
+        String peer = request.getRemoteAddr();
+        String forwarded = request.getHeader("X-Real-IP");
+        if (emailProperties.getTrustedProxies().contains(peer) && forwarded != null
+                && forwarded.length() <= 45 && forwarded.matches("[0-9a-fA-F:.]+")) { return forwarded; }
+        return peer;
+    }
+
+    @PostMapping("/email/code")
+    public Result<Void> sendCode(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.SendCode req,
+                                jakarta.servlet.http.HttpServletRequest request) {
+        authService.sendEmailCode(req, clientIp(request)); return Result.success();
+    }
+    @PostMapping("/password/reset")
+    public Result<Void> resetPassword(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.ResetPassword req) {
+        authService.resetPassword(req); return Result.success();
+    }
+    @PostMapping("/migration/verify")
+    public Result<com.xiaoyang.d_game.dto.EmailAuthReq.MigrationToken> verifyMigration(
+            @Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.VerifyMigration req,
+            jakarta.servlet.http.HttpServletRequest request) {
+        return Result.success(authService.verifyMigration(req, clientIp(request)));
+    }
+    @PostMapping("/migration/email/code")
+    public Result<Void> migrationCode(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.MigrationEmail req,
+                                     jakarta.servlet.http.HttpServletRequest request) {
+        authService.sendMigrationCode(req, clientIp(request)); return Result.success();
+    }
+    @PostMapping("/migration/bind")
+    public Result<TokenResp> bindMigration(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.BindMigration req) {
+        return Result.success(authService.bindMigration(req));
+    }
 
     @Operation(summary = "用户注册")
     @PostMapping("/register")

@@ -99,6 +99,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         resp.setUsername(user.getUsername());
         resp.setNickname(user.getNickname());
         resp.setEmail(user.getEmail());
+        resp.setEmailVerifiedAt(user.getEmailVerifiedAt());
         resp.setMobile(user.getMobile());
         resp.setAvatarUrl(user.getAvatarUrl());
         resp.setBio(user.getBio());
@@ -195,13 +196,17 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
-        User user = getRequiredUser(userId);
+        getRequiredUser(userId);
+        User user = new User();
+        user.setId(userId);
+        user.setNickname(null);
+        user.setBio(null);
+        user.setStatus(null);
         if (StringUtils.hasText(req.getNickname())) {
             user.setNickname(req.getNickname());
         }
-        if (StringUtils.hasText(req.getEmail())) {
-            checkEmailUnique(req.getEmail(), userId);
-            user.setEmail(req.getEmail());
+        if (req.getEmail() != null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "邮箱必须通过专用验证流程绑定，暂不支持更换");
         }
         if (StringUtils.hasText(req.getMobile())) {
             checkMobileUnique(req.getMobile(), userId);
@@ -214,7 +219,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             user.setBio(req.getBio());
         }
         updateById(user);
-        return toUserResp(user);
+        return toUserResp(getRequiredUser(userId));
     }
 
     /**
@@ -234,19 +239,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return userFollowMapper.selectCount(new LambdaQueryWrapper<UserFollow>()
                 .eq(UserFollow::getFollowerId, currentUserId)
                 .eq(UserFollow::getFolloweeId, targetUserId)) > 0;
-    }
-
-    /**
-     * 校验邮箱唯一性。
-     */
-    private void checkEmailUnique(String email, Long userId) {
-        User exists = getOne(new LambdaQueryWrapper<User>()
-                .eq(User::getEmail, email)
-                .ne(User::getId, userId)
-                .last("LIMIT 1"));
-        if (exists != null) {
-            throw new BizException(ResultCode.CONFLICT, "邮箱已被使用");
-        }
     }
 
     /**

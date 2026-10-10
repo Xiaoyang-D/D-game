@@ -40,7 +40,7 @@ public enum ResultCode {
     USER_NOT_FOUND(1002, "用户不存在"),
 
     /** 登录密码不匹配；为安全起见不区分用户名不存在和密码错误。 */
-    PASSWORD_ERROR(1003, "用户名或密码错误"),
+    PASSWORD_ERROR(1003, "账号或密码错误"),
 
     /** 用户账号已被管理员封禁。 */
     USER_BANNED(1004, "账号已被封禁"),

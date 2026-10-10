@@ -19,29 +19,41 @@ import com.xiaoyang.d_game.service.AuthService;
 import com.xiaoyang.d_game.service.UserService;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.UUID;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import com.xiaoyang.d_game.dto.EmailAuthReq;
+import com.xiaoyang.d_game.dto.EmailAuthReq.Purpose;
+import com.xiaoyang.d_game.manager.EmailCodeManager;
+import com.xiaoyang.d_game.mapper.UserMapper;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DuplicateKeyException;
 
 @Service
-@Slf4j
 @RequiredArgsConstructor
 /**
  * 认证业务实现。
  *
  * <p>负责注册、登录、刷新 token 三条主链路。注册时会写用户表并分配默认 USER 角色；
- * 登录和刷新时都会校验账号状态，避免封禁账号继续使用旧 token。</p>
+ * 登录和刷新校验账号状态、邮箱验证和认证版本。</p>
  */
 public class AuthServiceImpl implements AuthService {
 
     /** 新注册用户默认绑定的普通用户角色编码。 */
     private static final String ROLE_USER = "USER";
+    private static final org.springframework.data.redis.core.script.DefaultRedisScript<Long> MIGRATION_ATTEMPT =
+            new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+                    "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],600) end; return n", Long.class);
 
     private final UserService userService;
+    private final UserMapper userMapper;
+    private final EmailCodeManager emailCodes;
+    private final StringRedisTemplate redis;
     private final UserRoleRelMapper userRoleRelMapper;
     private final SysRoleMapper sysRoleMapper;
     private final PasswordEncoder passwordEncoder;
@@ -57,28 +69,23 @@ public class AuthServiceImpl implements AuthService {
      * <p>事务覆盖用户插入和默认角色绑定，避免出现用户创建成功但角色关系丢失的半完成状态。</p>
      */
     public TokenResp register(RegisterReq req) {
-        log.debug("开始注册用户, username={}", req.getUsername());
-        // 用户名是登录主标识，必须唯一。
-        if (userService.getByUsername(req.getUsername()) != null) {
-            throw new BizException(ResultCode.USER_EXISTS);
+        String email = EmailCodeManager.normalize(req.getEmail());
+        emailCodes.consume(email, Purpose.REGISTER, "", req.getCode());
+        if (userMapper.countEmailIncludingDeleted(email) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "无法注册，请检查邮箱或使用旧账号绑定入口");
         }
-        // 邮箱是可选字段，但一旦填写也要满足唯一约束，避免账号找回和通知场景出现歧义。
-        if (StringUtils.hasText(req.getEmail())) {
-            User emailUser = userService.getOne(new LambdaQueryWrapper<User>()
-                    .eq(User::getEmail, req.getEmail())
-                    .last("LIMIT 1"));
-            if (emailUser != null) {
-                throw new BizException(ResultCode.CONFLICT, "邮箱已被使用");
-            }
-        }
-        // 只保存 BCrypt 哈希，不保存明文密码；昵称为空时默认使用用户名。
         User user = new User();
-        user.setUsername(req.getUsername());
+        user.setUsername("u_" + UUID.randomUUID().toString().replace("-", ""));
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
-        user.setNickname(StringUtils.hasText(req.getNickname()) ? req.getNickname() : req.getUsername());
-        user.setEmail(req.getEmail());
-        user.setMobile(req.getMobile());
-        userService.save(user);
+        user.setNickname(req.getNickname().trim());
+        user.setEmail(email);
+        user.setEmailVerifiedAt(LocalDateTime.now());
+        user.setAuthVersion(1);
+        try {
+            if (!userService.save(user)) { throw new BizException(ResultCode.INTERNAL_ERROR); }
+        } catch (DuplicateKeyException exception) {
+            throw new BizException(ResultCode.CONFLICT, "无法注册，请检查邮箱或使用旧账号绑定入口");
+        }
 
         // 初始化脚本会创建 USER 角色；这里做空判断，保证缺少角色配置时注册本身不被阻断。
         SysRole userRole = sysRoleMapper.selectOne(new LambdaQueryWrapper<SysRole>()
@@ -90,7 +97,7 @@ public class AuthServiceImpl implements AuthService {
             rel.setRoleId(userRole.getId());
             userRoleRelMapper.insert(rel);
         }
-        log.debug("用户注册成功, userId={}, username={}", user.getId(), user.getUsername());
+
         return buildTokenResp(user);
     }
 
@@ -98,16 +105,15 @@ public class AuthServiceImpl implements AuthService {
     /**
      * 用户登录。
      *
-     * <p>用户名不存在和密码错误都返回同一个错误，避免暴露账号是否存在。</p>
+     * <p>邮箱未验证、账号不存在和密码错误都返回同一个错误，避免暴露账号是否存在。</p>
      */
     public TokenResp login(LoginReq req) {
-        log.debug("开始登录校验, username={}", req.getUsername());
-        User user = userService.getByUsername(req.getUsername());
-        if (user == null || !passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
+        User user = findEmail(EmailCodeManager.normalize(req.getEmail()));
+        if (user == null || user.getEmailVerifiedAt() == null
+                || !passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
             throw new BizException(ResultCode.PASSWORD_ERROR);
         }
         userService.checkUserAvailable(user);
-        log.debug("用户登录成功, userId={}, username={}", user.getId(), user.getUsername());
         return buildTokenResp(user);
     }
 
@@ -118,7 +124,7 @@ public class AuthServiceImpl implements AuthService {
      * <p>只接受 refresh token，拒绝 access token 误用；解析出用户后重新查询数据库状态和角色。</p>
      */
     public TokenResp refresh(RefreshTokenReq req) {
-        log.debug("开始刷新 Token");
+
         Claims claims = jwtUtil.parseToken(req.getRefreshToken());
         if (!JwtUtil.TOKEN_TYPE_REFRESH.equals(claims.get(JwtUtil.CLAIM_TOKEN_TYPE, String.class))) {
             throw new BizException(ResultCode.TOKEN_INVALID);
@@ -129,11 +135,10 @@ public class AuthServiceImpl implements AuthService {
         Long userId = jwtUtil.getUserId(claims);
         User user = userService.getById(userId);
         if (user == null) {
-            log.debug("刷新 Token 失败, 用户不存在, userId={}", userId);
             throw new BizException(ResultCode.TOKEN_INVALID);
         }
         userService.checkUserAvailable(user);
-        log.debug("刷新 Token 成功, userId={}, username={}", user.getId(), user.getUsername());
+        jwtUtil.validateAuthVersion(claims, user);
         return buildTokenResp(user);
     }
 
@@ -154,6 +159,99 @@ public class AuthServiceImpl implements AuthService {
         tokenRevocationService.revoke(refreshClaims);
     }
 
+    private User findEmail(String email) {
+        return userService.getOne(new LambdaQueryWrapper<User>().eq(User::getEmail, email).last("LIMIT 1"));
+    }
+
+    @Override
+    public void sendEmailCode(EmailAuthReq.SendCode req, String ip) {
+        if (req.getPurpose() == Purpose.MIGRATION) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请使用旧账号迁移入口");
+        }
+        String email = EmailCodeManager.normalize(req.getEmail());
+        User user = findEmail(email);
+        boolean eligible = req.getPurpose() == Purpose.REGISTER
+                ? userMapper.countEmailIncludingDeleted(email) == 0
+                : user != null && user.getEmailVerifiedAt() != null && Integer.valueOf(1).equals(user.getStatus());
+        emailCodes.send(email, req.getPurpose(), "", ip, eligible);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resetPassword(EmailAuthReq.ResetPassword req) {
+        String email = EmailCodeManager.normalize(req.getEmail());
+        emailCodes.consume(email, Purpose.RESET_PASSWORD, "", req.getCode());
+        User user = findEmail(email);
+        if (user == null || user.getEmailVerifiedAt() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "验证码无效或已过期");
+        }
+        userService.checkUserAvailable(user);
+        if (userMapper.resetPassword(user.getId(), user.getAuthVersion(), passwordEncoder.encode(req.getNewPassword())) != 1) {
+            throw new BizException(ResultCode.CONFLICT, "账号已发生变化，请重新操作");
+        }
+    }
+
+    @Override
+    public EmailAuthReq.MigrationToken verifyMigration(EmailAuthReq.VerifyMigration req, String ip) {
+        // Limit credential guessing independently from mail sending.
+        String key = "auth:migration-attempt:" + ip;
+        Long attempts = redis.execute(MIGRATION_ATTEMPT, List.of(key));
+        if (attempts == null || attempts > 20) {
+            throw new BizException(ResultCode.BAD_REQUEST, "操作过于频繁，请稍后重试");
+        }
+        User user = userService.getByUsername(req.getUsername());
+        if (user == null || !passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
+            throw new BizException(ResultCode.PASSWORD_ERROR);
+        }
+        userService.checkUserAvailable(user);
+        if (user.getEmailVerifiedAt() != null) {
+            throw new BizException(ResultCode.CONFLICT, "账号已绑定邮箱，请使用邮箱登录");
+        }
+        String token = UUID.randomUUID().toString();
+        redis.opsForValue().set("auth:migration:" + token, user.getId() + ":" + user.getAuthVersion(), Duration.ofMinutes(10));
+        return new EmailAuthReq.MigrationToken(token, 600);
+    }
+
+    private User migrationUser(String token) {
+        String value = redis.opsForValue().get("auth:migration:" + token);
+        if (value == null) { throw new BizException(ResultCode.BAD_REQUEST, "迁移凭证已过期，请重新验证原账号"); }
+        String[] parts = value.split(":");
+        User user = userService.getById(Long.valueOf(parts[0]));
+        if (user == null || user.getEmailVerifiedAt() != null || !String.valueOf(user.getAuthVersion()).equals(parts[1])) {
+            throw new BizException(ResultCode.CONFLICT, "账号已发生变化，请重新验证");
+        }
+        userService.checkUserAvailable(user);
+        return user;
+    }
+
+    @Override
+    public void sendMigrationCode(EmailAuthReq.MigrationEmail req, String ip) {
+        User user = migrationUser(req.getMigrationToken());
+        String email = EmailCodeManager.normalize(req.getEmail());
+        boolean eligible = email.equals(user.getEmail()) || userMapper.countEmailIncludingDeleted(email) == 0;
+        emailCodes.send(email, Purpose.MIGRATION, req.getMigrationToken(), ip, eligible);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TokenResp bindMigration(EmailAuthReq.BindMigration req) {
+        User user = migrationUser(req.getMigrationToken());
+        String email = EmailCodeManager.normalize(req.getEmail());
+        emailCodes.consume(email, Purpose.MIGRATION, req.getMigrationToken(), req.getCode());
+        if (!email.equals(user.getEmail()) && userMapper.countEmailIncludingDeleted(email) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "邮箱无法绑定");
+        }
+        try {
+            if (userMapper.bindEmail(user.getId(), user.getAuthVersion(), email) != 1) {
+                throw new BizException(ResultCode.CONFLICT, "账号已发生变化，请重新验证");
+            }
+        } catch (DuplicateKeyException exception) {
+            throw new BizException(ResultCode.CONFLICT, "邮箱无法绑定");
+        }
+        redis.delete("auth:migration:" + req.getMigrationToken());
+        return buildTokenResp(userService.getById(user.getId()));
+    }
+
     /**
      * 组装 token 响应。
      *
@@ -162,8 +260,8 @@ public class AuthServiceImpl implements AuthService {
     private TokenResp buildTokenResp(User user) {
         List<String> roles = userService.listRoleCodes(user.getId());
         TokenResp resp = new TokenResp();
-        resp.setAccessToken(jwtUtil.generateAccessToken(user.getId(), user.getUsername(), roles));
-        resp.setRefreshToken(jwtUtil.generateRefreshToken(user.getId(), user.getUsername(), roles));
+        resp.setAccessToken(jwtUtil.generateAccessToken(user.getId(), user.getUsername(), roles, user.getAuthVersion()));
+        resp.setRefreshToken(jwtUtil.generateRefreshToken(user.getId(), user.getUsername(), roles, user.getAuthVersion()));
         resp.setExpiresIn(jwtProperties.getAccessExpireMs() / 1000);
         resp.setUser(userService.toUserResp(user));
         return resp;

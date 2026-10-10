@@ -64,7 +64,8 @@ public class SecurityConfig {
                         // 浏览器跨域预检不携带业务 token，必须允许其先通过。
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // 注册、登录和刷新 token 是认证入口，不能要求已有 access token。
-                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
+                        .requestMatchers("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/email/code", "/api/v1/auth/password/reset",
+                                "/api/v1/auth/migration/verify", "/api/v1/auth/migration/email/code", "/api/v1/auth/migration/bind").permitAll()
                         // API 文档和已经由 MVC 映射的静态文件对外开放。
                         .requestMatchers("/doc.html", "/webjars/**", "/v3/api-docs/**", "/swagger-ui/**", "/files/**").permitAll()
                         // 管理路径除了登录外还必须包含 ADMIN 角色。

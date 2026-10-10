@@ -121,7 +121,7 @@ const id = String(response.data.data);
 |------|---------|------|
 | 1001 | 用户已存在 | 注册时用户名重复 |
 | 1002 | 用户不存在 | 目标用户不存在 |
-| 1003 | 用户名或密码错误 | 登录失败 |
+| 1003 | 账号或密码错误 | 登录失败 |
 | 1004 | 账号已被封禁 | 用户状态为封禁 |
 | 1005 | Token无效 | refreshToken 格式错误 |
 | 1006 | Token已过期 | Token 已过期 |
@@ -191,79 +191,41 @@ const id = String(response.data.data);
 
 ## 4. 认证模块
 
-### 4.1 用户注册
+### 4.1 邮箱注册
 
-- **URL**：`POST /api/v1/auth/register`
-- **鉴权**：公开
-- **Content-Type**：`application/json`
-
-**请求体**
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| username | string | 是 | 用户名，3-64 字符 |
-| password | string | 是 | 密码，6-64 字符 |
-| nickname | string | 否 | 昵称，最长 64 字符，默认等于用户名 |
-| email | string | 否 | 邮箱 |
-| mobile | string | 否 | 手机号 |
-
-**请求示例**
+`POST /api/v1/auth/register`，公开，JSON 请求：
 
 ```json
-{
-  "username": "player01",
-  "password": "123456",
-  "nickname": "游戏玩家",
-  "email": "player01@example.com"
-}
+{"email":"player@example.com","code":"123456","password":"StrongPass123","nickname":"游戏玩家"}
 ```
 
-**响应 data**：`TokenResp`
+所有字段必填。邮箱最多 128 字符，trim 后转小写；验证码 6 位数字；密码 6-64 字符；昵称 1-64 字符。后端生成唯一内部用户名。邮箱验证成功后创建账号并自动登录。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| accessToken | string | 访问令牌 |
-| refreshToken | string | 刷新令牌 |
-| expiresIn | long | accessToken 有效期（秒） |
+响应 `TokenResp` 包含 `accessToken`、`refreshToken`、`expiresIn` 和 `user`。用户资料增加 `emailVerifiedAt`。访问和刷新令牌包含认证版本，重置密码和迁移绑定会使旧令牌失效。
 
-**响应示例**
+### 4.2 邮箱登录与验证流程
+
+`POST /api/v1/auth/login`，公开：
 
 ```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
-    "refreshToken": "eyJhbGciOiJIUzI1NiJ9...",
-    "expiresIn": 7200
-  }
-}
+{"email":"player@example.com","password":"StrongPass123"}
 ```
 
----
+只接受已验证邮箱账号，返回 `TokenResp`。用户名登录已取消；旧账号从迁移入口完成绑定。账号不存在、邮箱未验证或密码错误均返回统一登录失败提示。
 
-### 4.2 用户登录
+下列接口均公开，迁移绑定接口依赖专用临时凭证：
 
-- **URL**：`POST /api/v1/auth/login`
-- **鉴权**：公开
+| 接口（`/api/v1/auth` 前缀） | JSON 请求字段 | 响应 data |
+| --- | --- | --- |
+| `POST /email/code` | `email`、`purpose`（`REGISTER` 或 `RESET_PASSWORD`） | null |
+| `POST /password/reset` | `email`、`code`、`newPassword` | null |
+| `POST /migration/verify` | `username`、`password`（原账号凭据） | `migrationToken`、`expiresIn`（600 秒） |
+| `POST /migration/email/code` | `migrationToken`、`email` | null |
+| `POST /migration/bind` | `migrationToken`、`email`、`code` | `TokenResp` |
 
-**请求体**
+验证码默认 300 秒有效、60 秒重发间隔、最多错 5 次，每邮箱每小时 10 次、每 IP 每小时 30 次。注册、密码找回和迁移用途隔离；迁移验证码还绑定专用凭证。成功原子消费，数据库操作失败需重新发码；邮件发送失败不生成有效验证码并释放发信占用。
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| username | string | 是 | 用户名 |
-| password | string | 是 | 密码 |
-
-**请求示例**
-
-```json
-{
-  "username": "admin",
-  "password": "Admin@123456"
-}
-```
-
-**响应 data**：`TokenResp`（同注册）
+发信成功响应不区分邮箱是否符合条件；不符合条件时不发信。旧邮箱即使未验证也保留占用；可以通过原账号迁移验证同一邮箱。已绑定账号不允许再次迁移或更换邮箱。迁移保留用户 ID、角色及所有社区数据。
 
 ---
 
@@ -322,7 +284,7 @@ const id = String(response.data.data);
     "id": 1,
     "username": "admin",
     "nickname": "系统管理员",
-    "email": "admin@dgame.com",
+    "email": "player@example.com",
     "mobile": null,
     "avatarUrl": null,
     "bio": "",
@@ -340,12 +302,11 @@ const id = String(response.data.data);
 - **URL**：`PUT /api/v1/users/me`
 - **鉴权**：需登录
 
-**请求体**（所有字段可选，传什么改什么）
+**请求体**（所有字段可选，传什么改什么；提交 email 字段会被拒绝，邮箱只能通过验证流程绑定，暂不支持更换）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | nickname | string | 昵称，最长 64 |
-| email | string | 邮箱 |
 | mobile | string | 手机号 |
 | avatarUrl | string | 头像 URL（可先通过文件上传接口获取） |
 | bio | string | 简介，最长 500 |
