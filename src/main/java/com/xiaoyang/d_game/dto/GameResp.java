@@ -46,4 +46,10 @@ public class GameResp {
 
     /** 标签名称列表。 */
     private List<String> tags;
+    /** 游戏版区展示设置，与封面分开维护。 */
+    private String englishName = "";
+    private String iconUrl = "";
+    private String bannerUrl = "";
+    private Integer sortOrder = 0;
+    private Boolean enabled = true;
 }

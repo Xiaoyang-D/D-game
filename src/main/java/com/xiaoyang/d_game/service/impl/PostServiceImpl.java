@@ -71,6 +71,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     private static final ZoneId SHANGHAI_ZONE = ZoneId.of("Asia/Shanghai");
 
+    private final com.xiaoyang.d_game.service.GameSectionService gameSections;
     private final BoardMapper boardMapper;
     private final GameMapper gameMapper;
     private final UserMapper userMapper;
@@ -403,7 +404,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
         }
-        validateOfficialBoard(board);
+        gameSections.validatePublishing(req.getGameId(), board, CurrentUser.hasRole("ADMIN"));
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
@@ -562,6 +563,17 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
                 .le(Post::getScheduledPublishAt, now)
                 .last("LIMIT 100"));
         for (Post post : duePosts) {
+            try {
+                Board board = boardMapper.selectById(post.getBoardId());
+                if (board == null) { throw new BizException(ResultCode.BOARD_NOT_FOUND); }
+                gameSections.validatePublishing(post.getGameId(), board, gameSections.isAdministrator(post.getUserId()));
+            } catch (BizException exception) {
+                // 条件变化时取消定时，保留草稿；一篇无效草稿不阻塞其他帖子。
+                update(new LambdaUpdateWrapper<Post>().eq(Post::getId, post.getId())
+                        .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode()).set(Post::getScheduledPublishAt, null));
+                log.info("定时发布已取消，版区或发布权限变化，postId={}", post.getId());
+                continue;
+            }
             update(new LambdaUpdateWrapper<Post>()
                     .eq(Post::getId, post.getId())
                     .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
@@ -615,12 +627,15 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     }
 
     private void validateDraftFields(PostDraftSaveReq req) {
+        if (req.getGameId() != null && !Boolean.TRUE.equals(gameSections.requireGame(req.getGameId()).getEnabled())) {
+            throw new BizException(ResultCode.FORBIDDEN, "游戏版区已停用");
+        }
         if (req.getBoardId() != null) {
             Board board = boardMapper.selectById(req.getBoardId());
             if (board == null) {
                 throw new BizException(ResultCode.BOARD_NOT_FOUND);
             }
-            validateOfficialBoard(board);
+            gameSections.validatePublishing(req.getGameId(), board, CurrentUser.hasRole("ADMIN"));
         }
         if (req.getTitle() != null && req.getTitle().length() > 40) {
             throw new BizException(ResultCode.BAD_REQUEST, "标题长度不能超过40");
@@ -642,7 +657,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
         }
-        validateOfficialBoard(board);
+        gameSections.validatePublishing(req.getGameId(), board, CurrentUser.hasRole("ADMIN"));
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
@@ -657,6 +672,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
      * A scheduled draft is already a publishable submission. Keep ordinary drafts
      * permissive, but require all publish fields before accepting a schedule.
      */
+    private String boardDisplayName(Long gameId, Board board) {
+        if (gameId == null) { return board.getName(); }
+        com.xiaoyang.d_game.entity.GameBoardSetting setting = gameSections.findSetting(gameId, board.getId());
+        return setting == null ? board.getName() : setting.getName();
+    }
+
     private void validateScheduledDraft(PostDraftSaveReq req, Long userId) {
         if (req.getBoardId() == null || !StringUtils.hasText(req.getTitle())
                 || !StringUtils.hasText(req.getContent())) {
@@ -669,19 +690,13 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
         }
-        validateOfficialBoard(board);
+        gameSections.validatePublishing(req.getGameId(), board, CurrentUser.hasRole("ADMIN"));
         if (req.getGameId() != null && gameMapper.selectById(req.getGameId()) == null) {
             throw new BizException(ResultCode.GAME_NOT_FOUND);
         }
         validateCollectionOwner(req.getCollectionId(), userId);
         normalizeTopicNames(req.getTopicNames());
         validateSchedule(req.getScheduledPublishAt());
-    }
-
-    private void validateOfficialBoard(Board board) {
-        if ("官方".equals(board.getName()) && !CurrentUser.hasRole("ADMIN")) {
-            throw new BizException(ResultCode.FORBIDDEN, "官方分区仅管理员可以发布");
-        }
     }
 
     private void validateSchedule(LocalDateTime scheduledAt) {
@@ -805,7 +820,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         response.setBoardId(post.getBoardId());
         if (post.getBoardId() != null) {
             Board board = boardMapper.selectById(post.getBoardId());
-            response.setBoardName(board == null ? null : board.getName());
+            response.setBoardName(board == null ? null : boardDisplayName(post.getGameId(), board));
         }
         response.setGameId(post.getGameId());
         if (post.getGameId() != null) {
@@ -834,7 +849,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         response.setBoardId(post.getBoardId());
         if (post.getBoardId() != null) {
             Board board = boardMapper.selectById(post.getBoardId());
-            response.setBoardName(board == null ? null : board.getName());
+            response.setBoardName(board == null ? null : boardDisplayName(post.getGameId(), board));
         }
         response.setGameId(post.getGameId());
         if (post.getGameId() != null) {
@@ -893,7 +908,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         resp.setScheduledPublishAt(post.getScheduledPublishAt());
         if (post.getBoardId() != null) {
             Board board = boardMapper.selectById(post.getBoardId());
-            resp.setBoardName(board == null ? null : board.getName());
+            resp.setBoardName(board == null ? null : boardDisplayName(post.getGameId(), board));
         }
         if (post.getGameId() != null) {
             Game game = gameMapper.selectById(post.getGameId());

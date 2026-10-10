@@ -23,4 +23,16 @@ public class Board extends BaseEntity {
 
     /** 排序值，越小越靠前。 */
     private Integer sortOrder = 0;
+    /** 私有分区只能在关联的游戏中使用。 */
+    private Boolean scopePrivate = false;
+    /** 未指定游戏时使用的发布权限。 */
+    private String publishPolicy = "LOGIN";
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String iconKey = "forum";
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String iconUrl = "";
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String bannerUrl = "";
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Boolean enabled = true;
 }

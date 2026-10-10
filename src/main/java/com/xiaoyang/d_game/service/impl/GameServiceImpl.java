@@ -51,6 +51,7 @@ import java.util.stream.Collectors;
  */
 public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements GameService {
 
+    private final com.xiaoyang.d_game.service.GameSectionService gameSections;
     private final GameCategoryMapper gameCategoryMapper;
     private final TagMapper tagMapper;
     private final GameTagRelMapper gameTagRelMapper;
@@ -64,7 +65,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
      * <p>支持分类、关键字和标签筛选。标签筛选使用 EXISTS 子查询，避免把关联表 join 后影响分页记录数。</p>
      */
     public PageResult<GameResp> pageGames(GameQueryReq req) {
-        LambdaQueryWrapper<Game> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<Game> wrapper = new LambdaQueryWrapper<Game>().eq(Game::getEnabled, true);
         if (req.getCategoryId() != null) {
             wrapper.eq(Game::getCategoryId, req.getCategoryId());
         }
@@ -75,7 +76,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
             wrapper.apply("EXISTS (SELECT 1 FROM game_tag_rel gtr WHERE gtr.game_id = id "
                     + "AND gtr.tag_id = {0} AND gtr.is_deleted = 0)", req.getTagId());
         }
-        wrapper.orderByDesc(Game::getId);
+        wrapper.orderByAsc(Game::getSortOrder).orderByAsc(Game::getId);
         Page<Game> page = page(new Page<>(req.getPage(), req.getSize()), wrapper);
         List<GameResp> records = toGameResps(page.getRecords());
         PageResult<GameResp> result = new PageResult<>();
@@ -94,7 +95,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
      */
     public PageResult<GameResp> pageRanking(GameRankingQueryReq req) {
         GameRankingTypeEnum rankingType = GameRankingTypeEnum.fromCode(req.getType());
-        LambdaQueryWrapper<Game> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<Game> wrapper = new LambdaQueryWrapper<Game>().eq(Game::getEnabled, true);
         if (rankingType == GameRankingTypeEnum.POPULAR) {
             wrapper.orderByDesc(Game::getRatingCount)
                     .orderByDesc(Game::getAvgRating);
@@ -140,6 +141,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         game.setDeveloper(req.getDeveloper() == null ? "" : req.getDeveloper());
         game.setReleaseDate(req.getReleaseDate());
         save(game);
+        gameSections.initializeBoards(game.getId());
         if (req.getTagIds() != null && !req.getTagIds().isEmpty()) {
             // 当前接口信任前端传入的 tagId 已存在；如果后续开放给非管理员，应增加标签存在性校验。
             for (Long tagId : req.getTagIds()) {
@@ -319,6 +321,8 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         GameResp resp = new GameResp();
         resp.setId(game.getId());
         resp.setName(game.getName());
+        resp.setEnglishName(game.getEnglishName()); resp.setIconUrl(game.getIconUrl());
+        resp.setBannerUrl(game.getBannerUrl()); resp.setSortOrder(game.getSortOrder()); resp.setEnabled(game.getEnabled());
         resp.setCategoryId(game.getCategoryId());
         resp.setCoverUrl(game.getCoverUrl());
         resp.setDescription(game.getDescription());

@@ -24,6 +24,7 @@ import java.util.List;
 public class BoardController {
 
     private final BoardService boardService;
+    private final com.xiaoyang.d_game.service.GameSectionService gameSections;
 
     /**
      * 查询版块列表。
@@ -32,7 +33,7 @@ public class BoardController {
      */
     @Operation(summary = "版块列表")
     @GetMapping
-    public Result<List<Board>> list() {
-        return Result.success(boardService.listBoards());
+    public Result<List<Board>> list(@org.springframework.web.bind.annotation.RequestParam(required = false) Long gameId) {
+        return Result.success(gameId == null ? boardService.listBoards() : gameSections.publicBoards(gameId));
     }
 }

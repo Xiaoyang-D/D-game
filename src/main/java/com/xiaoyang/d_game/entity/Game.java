@@ -41,4 +41,10 @@ public class Game extends BaseEntity {
 
     /** 评分人数，来自 game_rating 表汇总。 */
     private Integer ratingCount = 0;
+    /** 游戏版区展示设置，与封面分开维护。 */
+    private String englishName = "";
+    private String iconUrl = "";
+    private String bannerUrl = "";
+    private Integer sortOrder = 0;
+    private Boolean enabled = true;
 }

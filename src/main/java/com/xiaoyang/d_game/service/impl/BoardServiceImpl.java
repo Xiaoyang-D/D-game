@@ -22,6 +22,6 @@ public class BoardServiceImpl extends ServiceImpl<BoardMapper, Board> implements
      * 查询版块列表。
      */
     public List<Board> listBoards() {
-        return list(new LambdaQueryWrapper<Board>().orderByAsc(Board::getSortOrder));
+        return list(new LambdaQueryWrapper<Board>().eq(Board::getScopePrivate, false).orderByAsc(Board::getSortOrder));
     }
 }
