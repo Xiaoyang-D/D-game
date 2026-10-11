@@ -37,9 +37,13 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -56,6 +60,7 @@ public class InteractServiceImpl implements InteractService {
 
     private static final String LIKE_CACHE_KEY_PREFIX = "interaction:like:";
     private static final String FAVORITE_CACHE_KEY_PREFIX = "interaction:favorite:";
+    private static final int COMMENT_DELETE_BATCH_SIZE = 500;
 
     private final CommentMapper commentMapper;
     private final PostMapper postMapper;
@@ -75,13 +80,10 @@ public class InteractServiceImpl implements InteractService {
      */
     public Long createComment(CommentCreateReq req) {
         Long userId = currentUserId();
-        Post post = postMapper.selectById(req.getPostId());
-        if (post == null) {
-            throw new BizException(ResultCode.POST_NOT_FOUND);
-        }
+        Post post = lockCommentPost(req.getPostId());
         if (req.getParentId() != null && req.getParentId() > 0) {
             // 父评论存在性校验，避免创建悬空楼中楼。
-            Comment parent = commentMapper.selectById(req.getParentId());
+            Comment parent = lockComment(req.getParentId(), post.getId());
             if (parent == null) {
                 throw new BizException(ResultCode.COMMENT_NOT_FOUND);
             }
@@ -101,6 +103,120 @@ public class InteractServiceImpl implements InteractService {
         notificationService.sendNotification(post.getUserId(), userId, NotificationTypeEnum.COMMENT.getCode(),
                 "收到新评论", "你的帖子收到了新评论", TargetTypeEnum.POST.getCode(), post.getId());
         return comment.getId();
+    }
+
+    /**
+     * 删除顶级评论时删除整个楼层；删除楼内回复时仅删除该回复并保留后续回复。
+     * 创建和删除统一先锁帖子，保证并发回复不会引用已经删除的评论。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteComment(Long commentId) {
+        Long userId = currentUserId();
+        if (commentId == null || commentId <= 0) {
+            throw new BizException(ResultCode.BAD_REQUEST);
+        }
+        // 此次读取只定位所属帖子；取得帖子锁后必须用当前读重新检查评论。
+        Comment located = commentMapper.selectById(commentId);
+        if (located == null) {
+            throw new BizException(ResultCode.COMMENT_NOT_FOUND);
+        }
+        Post post = lockCommentPost(located.getPostId());
+        Comment comment = lockComment(commentId, post.getId());
+        if (comment == null) {
+            throw new BizException(ResultCode.COMMENT_NOT_FOUND);
+        }
+        if (!Objects.equals(userId, comment.getUserId())
+                && !Objects.equals(userId, post.getUserId()) && !CurrentUser.hasRole("ADMIN")) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权删除该评论");
+        }
+
+        if (comment.getParentId() == null || comment.getParentId() == 0L) {
+            int deletedCount = deleteCommentThread(comment);
+            incrementPostCounter(post.getId(), "comment_count", -deletedCount);
+            return;
+        }
+
+        Long parentId = comment.getParentId();
+        if (parentId == null || parentId <= 0 || Objects.equals(parentId, commentId)
+                || lockComment(parentId, post.getId()) == null) {
+            parentId = 0L;
+        }
+        if (commentMapper.deleteById(commentId) != 1) {
+            throw new BizException(ResultCode.COMMENT_NOT_FOUND);
+        }
+        commentMapper.update(null, new LambdaUpdateWrapper<Comment>()
+                .eq(Comment::getPostId, post.getId())
+                .eq(Comment::getParentId, commentId)
+                .set(Comment::getParentId, parentId)
+                .set(Comment::getGmtModified, LocalDateTime.now()));
+        incrementPostCounter(post.getId(), "comment_count", -1);
+    }
+
+    /** 按父子关系遍历整个楼层，分页锁定读取保证覆盖其他页及多层回复。 */
+    private int deleteCommentThread(Comment root) {
+        Set<Long> commentIds = new LinkedHashSet<>();
+        commentIds.add(root.getId());
+        List<Long> parents = List.of(root.getId());
+        while (!parents.isEmpty()) {
+            List<Long> nextParents = new ArrayList<>();
+            for (int offset = 0; offset < parents.size(); offset += COMMENT_DELETE_BATCH_SIZE) {
+                List<Long> parentBatch = parents.subList(offset, Math.min(offset + COMMENT_DELETE_BATCH_SIZE, parents.size()));
+                Long lastId = 0L;
+                while (true) {
+                    List<Comment> children = commentMapper.selectList(new LambdaQueryWrapper<Comment>()
+                            .select(Comment::getId)
+                            .eq(Comment::getPostId, root.getPostId())
+                            .in(Comment::getParentId, parentBatch)
+                            .gt(Comment::getId, lastId)
+                            .orderByAsc(Comment::getId)
+                            .last("LIMIT " + COMMENT_DELETE_BATCH_SIZE + " FOR UPDATE"));
+                    for (Comment child : children) {
+                        if (commentIds.add(child.getId())) {
+                            nextParents.add(child.getId());
+                        }
+                    }
+                    if (children.size() < COMMENT_DELETE_BATCH_SIZE) {
+                        break;
+                    }
+                    lastId = children.getLast().getId();
+                }
+            }
+            parents = nextParents;
+        }
+
+        List<Long> ids = new ArrayList<>(commentIds);
+        int deletedCount = 0;
+        for (int offset = 0; offset < ids.size(); offset += COMMENT_DELETE_BATCH_SIZE) {
+            List<Long> batch = ids.subList(offset, Math.min(offset + COMMENT_DELETE_BATCH_SIZE, ids.size()));
+            int affected = commentMapper.deleteByIds(batch);
+            if (affected != batch.size()) {
+                throw new BizException(ResultCode.CONFLICT, "评论已变更，请刷新后重试");
+            }
+            deletedCount += affected;
+        }
+        return deletedCount;
+    }
+
+    /** 在事务内按帖子串行化评论写入，查询明确字段并过滤逻辑删除记录。 */
+    private Post lockCommentPost(Long postId) {
+        Post post = postMapper.selectOne(new LambdaQueryWrapper<Post>()
+                .select(Post::getId, Post::getUserId)
+                .eq(Post::getId, postId)
+                .last("FOR UPDATE"));
+        if (post == null) {
+            throw new BizException(ResultCode.POST_NOT_FOUND);
+        }
+        return post;
+    }
+
+    /** 锁定读取避免 MySQL 可重复读快照或 MyBatis 一级缓存返回旧父节点。 */
+    private Comment lockComment(Long commentId, Long postId) {
+        return commentMapper.selectOne(new LambdaQueryWrapper<Comment>()
+                .select(Comment::getId, Comment::getPostId, Comment::getUserId, Comment::getParentId)
+                .eq(Comment::getId, commentId)
+                .eq(Comment::getPostId, postId)
+                .last("FOR UPDATE"));
     }
 
     @Override

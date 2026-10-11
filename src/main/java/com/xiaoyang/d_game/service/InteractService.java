@@ -18,6 +18,9 @@ public interface InteractService {
      */
     Long createComment(CommentCreateReq req);
 
+    /** 顶级评论删除整个楼层，楼内回复仅删除自身；同步帖子评论数。 */
+    void deleteComment(Long commentId);
+
     /**
      * 分页查询帖子评论。
      */
