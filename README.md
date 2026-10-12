@@ -1,167 +1,71 @@
-# 游戏社区平台后端 (D_game)
+# D-Game 游戏社区后端
 
-基于 Spring Boot 3.5 / Java 21 的游戏社区平台后端，遵循阿里巴巴 Java/MySQL 开发规范，持久层使用 MyBatis-Plus。
+## 项目介绍
 
-## 技术栈
+D-Game 是面向游戏玩家的交流社区，围绕游戏发现、内容分享和玩家交流，提供游戏版区、社区帖子、好友私信、消息通知与个人成长等功能。玩家可以寻找感兴趣的游戏，分享攻略、心得和创作，关注同好并参与讨论。
 
-- Spring Boot 3.5.14 / Java 21
-- MyBatis-Plus 3.5.9 + MySQL 8
-- Redis 7（签到 Bitmap、未读通知计数、Token 注销）
-- RabbitMQ 3.13（异步站内通知、死信队列）
-- Spring Security 6 + JWT 鉴权（jjwt 0.12）
-- Knife4j / OpenAPI3 接口文档
-- Docker / docker-compose 部署
+项目由社区前端、业务后端和游戏助手组成：前端提供社区浏览与互动页面，后端承载账号、内容、社交和管理业务，游戏助手帮助玩家查找游戏与公开讨论。本仓库是 D-Game 的业务后端。
 
-## 功能模块
+## 主要功能
 
-- 用户与鉴权：注册、登录、刷新 Token、登出、个人资料。密码使用 BCrypt 哈希，服务端使用无状态 Bearer JWT；退出登录后令牌会写入 Redis 注销名单。
-- 游戏库：游戏创建、分类、标签、筛选、排行榜、用户评分和评测；游戏表维护平均分及评分人数汇总。
-- 社区帖子：版块、富文本发帖、草稿、话题、个人合集、定时提交审核、关注流、排行榜和游戏关联讨论。
-- 互动：楼中楼评论、帖子/评论点赞、帖子/游戏收藏和关注用户；计数采用事务与数据库原子更新维护。
-- 通知：点赞、评论、关注和审核结果在主事务提交后投递 RabbitMQ，由消费者异步写入站内通知；未读数缓存在 Redis。
-- 成长体系：Redis Bitmap 每日签到、积分流水和首次签到/连续签到徽章。
-- 内容治理：举报处理、RBAC 角色权限、内容审核状态机、用户封禁和后台审计日志。
-- 文件：仅允许 JPEG、PNG、GIF、WebP 图片，按日期和 UUID 保存到本地目录，数据库记录元数据及访问 URL。
+### 账号与个人主页
 
-## 目录结构
+- 支持邮箱注册、邮箱验证、登录、退出登录和密码找回。
+- 支持已有账号验证身份后绑定邮箱。
+- 支持昵称、头像和个人简介维护。
+- 提供个人主页，展示已发布内容、收藏及关注信息。
 
-```
-src/main/java/com/xiaoyang/d_game/
-├── common/      统一返回、异常、枚举、BaseEntity
-├── config/      MyBatis-Plus、Redis、Knife4j、WebMvc、JWT/File 配置
-├── security/    JWT 工具、Spring Security 过滤器、当前用户上下文、令牌注销
-├── entity/      实体（对应数据库表）
-├── dto/         请求/响应对象
-├── mapper/      MyBatis-Plus Mapper
-├── service/     业务接口
-│   └── impl/    业务实现（事务边界）
-└── controller/  控制层（REST 接口，前缀 /api/v1）
-```
+### 游戏发现与版区
 
-## 快速启动
+- 提供游戏资料、分类、标签、关键词筛选和游戏排行榜。
+- 支持玩家评分与评测，展示综合评分和近期评价。
+- 为游戏提供独立版区，组织论坛、官方、攻略、互助、同人和 COS 等分区内容。
+- 支持分区展示信息、排序、启用状态和发布权限管理。
 
-### 方式一：Docker Compose（推荐）
+### 内容发布与管理
 
-```bash
-docker compose up -d --build
-```
+- 支持富文本图文帖子、话题和个人合集。
+- 支持保存草稿、继续编辑、即时发布和定时发布。
+- 支持作者查看、编辑和删除自己的帖子。
+- 提供帖子搜索、关注动态及热门与最新内容浏览。
+- 支持在帖子和评论中提及具体用户。
 
-启动后会自动初始化数据库（执行 `schema.sql` 与 `data.sql`）。
+### 评论与社区互动
 
-### 方式二：本地运行
+- 支持评论、楼中楼回复、帖子与评论点赞，以及帖子和游戏收藏。
+- 评论作者、帖子作者和管理员可以删除评论。
+- 删除顶级评论时清理该楼层全部回复；删除楼中楼评论时保留后续回复。
+- 支持关注与取消关注其他玩家，以及举报社区内容。
 
-1. 准备 MySQL 8 与 Redis 7，创建数据库并执行：
-   - `src/main/resources/db/schema.sql`
-   - `src/main/resources/db/data.sql`
-2. 准备 RabbitMQ 3.13，并通过环境变量配置数据源、Redis、RabbitMQ 与 JWT 密钥。
-3. 启动：
+### 好友与私信
 
-```bash
-./mvnw spring-boot:run
-```
+- 两位玩家互相关注后自动成为好友，已有互相关注同样适用。
+- 提供好友列表与昵称搜索，支持好友之间的一对一会话。
+- 支持文字、换行和 Unicode 表情，每条消息最多 2000 字符。
+- 支持发送失败重试，并避免同一条消息重复发送。
+- 发送者可以在发送后两分钟内撤回自己的消息，双方显示撤回提示。
+- 支持单方删除会话，仅清除本人的历史；之后的新消息使会话重新出现。
+- 取消任意一方关注后解除好友，保留聊天历史并停止新消息发送。
 
-## 配置环境
+### 消息中心与通知
 
-`application.yml` 只保留公共配置，并通过 `SPRING_PROFILES_ACTIVE` 选择具体环境，默认使用 `dev`：
+- 统一提供聊天列表、回复我的、@我的和收到的赞四类消息入口。
+- 提供系统通知、审核结果及关注与好友通知。
+- 回复、提及和点赞通知可跳转到对应内容，评论通知可定位到实际评论。
+- 支持分类未读统计、单条已读和当前分类全部已读。
+- 支持回复、提及、点赞、关注与好友四类提醒设置。
+- 支持实时消息与未读变化提醒；关闭提醒期间的新通知仍可在消息中心查看。
 
-| 环境 | 配置文件 | 说明 |
-|------|----------|------|
-| `dev` | `application-dev.yml` | 本地开发，默认连接本机 MySQL / Redis |
-| `test` | `application-test.yml` | 自动化测试使用，测试类默认激活 |
-| `prod` | `application-prod.yml` | 生产/容器部署，数据库、Redis、JWT、CORS 等必须通过环境变量提供 |
+### 签到与个人成长
 
-这三份 profile 文件按本地环境维护，已加入 `.gitignore`，不会上传到仓库。
+- 支持每日签到、连续签到天数和签到状态查询。
+- 提供积分记录与成长徽章。
+- 签到奖励暂未发放时保留补发状态，支持后续补发与重试。
 
-示例：
+### 社区管理
 
-```bash
-SPRING_PROFILES_ACTIVE=prod ./mvnw spring-boot:run
-```
-
-## 主要环境变量
-
-本地前端支持 `http://localhost:5173` 和 `http://127.0.0.1:5173`，开发及测试配置默认同时允许这两个来源。如果 IDE、系统环境或 Docker `.env` 中设置了 `CORS_ALLOWED_ORIGINS`，该值会覆盖默认配置；本地运行请使用 `http://localhost:5173,http://127.0.0.1:5173`。修改后重启后端。生产环境请明确填写实际前端来源，不使用通配符。
-
-登录接口返回 HTTP 403 且响应为 `Invalid CORS request` 时，检查浏览器请求的 `Origin` 是否在上述白名单中。`localhost` 和 `127.0.0.1` 是不同来源；即使请求通过 Vite 代理，原始 `Origin` 仍可能被转发给后端。
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `SPRING_PROFILES_ACTIVE` | 配置环境 | dev（Docker Compose 默认 prod） |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` | 数据库连接 | localhost / 3306 / d_game |
-| `DB_USER` / `DB_PASSWORD` | 数据库账号 | root / 空 |
-| `REDIS_HOST` / `REDIS_PORT` | Redis 连接 | localhost / 6379 |
-| `RABBITMQ_HOST` / `RABBITMQ_PORT` | RabbitMQ 连接 | localhost / 5672 |
-| `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | RabbitMQ 账号 | guest / guest |
-| `JWT_SECRET` | JWT 签名密钥，至少 32 字符 | 无，必须配置 |
-| `FILE_UPLOAD_DIR` | 文件上传目录 | ./uploads |
-| `FILE_BASE_URL` | 文件访问基础 URL | http://localhost:8080/files |
-
-Docker Compose 启动前可复制 `.env.example` 为 `.env`，并填写数据库密码、RabbitMQ 账号密码与随机 `JWT_SECRET`。`.env` 已被 `.gitignore` 忽略，请勿提交真实密钥。
-
-## 异步通知与并发安全
-
-### 签到奖励失败补偿
-
-升级已有数据库时，先执行 `src/main/resources/db/migrations/V5__check_in_reward_recovery.sql`，再启动新版后端。新建数据库的 `schema.sql` 已包含该表；项目不会自动运行这些迁移文件。
-
-签到先将用户和业务日期写入 `check_in_reward_task`，再幂等写入 Redis Bitmap 并发放奖励。积分和徽章在同一个数据库事务内提交，提交成功后才删除补偿任务。任何一步失败都保留任务；即使奖励已提交而任务删除失败，重放也会由既有积分业务键与徽章唯一键防止重复发放。并发请求发生唯一键冲突时，奖励事务回滚，保留任务等待下一次重试。
-
-后台默认每 60 秒处理最多 50 条到期任务，失败任务延后 60 秒再次处理；可用 `app.check-in.reward-retry-interval-ms` 调整轮询间隔。任务记录原始签到日期，因此跨天和服务重启后仍可补偿，不依赖用户再次登录。签到状态新增 `rewardPending`，前端据此保留“奖励待补发，点击重试”按钮。重复签到返回成功，本次未新增积分时为 0。
-
-任务表只记录升级后收到的签到请求；升级前已丢失的奖励不会自动生成历史补偿任务。Redis Bitmap 仍负责签到历史与连续天数，应继续配置 Redis 持久化和备份；本机制不替代 Redis 数据恢复。
-
-互动和审核操作不会同步写通知表：主事务提交后才投递 `NotificationEvent`，RabbitMQ 消费者在线程池中异步落库。消费者使用事件 ID 的 Redis 幂等标记防止重复消费，消费失败的消息会进入死信队列。
-
-高频状态更新也具备并发保护：签到使用 Redis `setBit` 判断重复请求；互动关系和评分使用数据库唯一索引；帖子互动计数使用数据库原子更新，避免并发覆盖。
-
-## 接口文档
-
-启动后访问：
-
-- Knife4j 文档：http://localhost:8080/doc.html
-- OpenAPI JSON：http://localhost:8080/v3/api-docs
-
-需要登录的接口在文档右上角填入 `Bearer <accessToken>`（通过 `Authorization` 认证）。
-
-## 默认管理员账号
-
-| 用户名 | 密码 |
-|--------|------|
-| `admin` | `Admin@123456` |
-
-> 生产环境请务必修改默认管理员密码，并使用高强度随机 `JWT_SECRET`。
-
-## 主要接口一览
-
-- 认证：`POST /api/v1/auth/register` `/login` `/refresh` `/logout`
-- 用户：`GET/PUT /api/v1/users/me`
-- 游戏：`GET /api/v1/games` `/games/{id}` `/games/categories` `/games/tags`，`POST /api/v1/games`（管理员）、`POST /api/v1/games/{id}/rating`
-- 版块/帖子：`GET /api/v1/boards`，`GET/POST /api/v1/posts` `/posts/{id}`
-- 互动：`GET/POST /api/v1/comments`，`POST/DELETE /api/v1/likes` `/favorites`，`POST/DELETE /api/v1/follows/{followeeId}`
-- 通知：`GET /api/v1/notifications` `/unread-count`，`PUT /api/v1/notifications/{id}/read` `/read-all`
-- 后台：`/api/v1/admin/**`（封禁、审核、角色，需 ADMIN 角色）
-- 文件：`POST /api/v1/files/upload`
-
-帖子即时发布、草稿发布和到期定时发布均自动公开。管理员在帖子管理中通过
-`GET /api/v1/admin/posts` 查看已提交帖子，调用原 `POST /api/v1/admin/posts/{id}/audit`
-接口进行封禁（approved=false）或解封（approved=true）。封禁沿用状态 3，不需要数据库迁移；
-作者修改封禁帖子不会恢复公开。历史状态 1 的帖子仍可在后台单独处理。
-
-游戏版区使用论坛、官方、攻略、互助、同人、COS 六个共享分区；帖子通过 gameId + boardId
-组合筛选。“推荐”是当前游戏全分区的点赞排序流（recommended=true），不作为发帖分类。
-官方分区仅管理员可发布，包括草稿和定时发布。已有数据库的分区升级脚本是本地 V8，
-保留原版块 ID 和帖子关联。
-
-## 邮箱认证
-
-注册使用邮箱、邮件验证码、密码和昵称，日常登录仅接受已验证邮箱和密码。旧账号通过前端 `/account-migration` 验证原用户名密码并绑定邮箱；支持 `/forgot-password` 验证码重置密码，重置后旧 JWT 全部失效。
-
-QQ 发信配置为 `MAIL_USERNAME`（发件邮箱）和 `MAIL_AUTH_CODE`（SMTP 授权码），运行配置、环境变量文件及 SQL 仅在本地保存，不纳入 Git。本地启动前需把变量注入进程；Spring Boot 不会自动加载 `.env`。接收邮箱不限 QQ。SMTP 配置使用 TLS 和有限超时，不输出验证码。
-
-旧库备份并停止写入后人工执行 `src/main/resources/db/migrations/V9__email_auth.sql`，先处理邮箱规范化冲突。全新 schema 已包含字段，不重复执行。初始化管理员必须验证绑定邮箱并重置为独立强密码。详细接口见 `docs/API.md`，上线步骤见项目根目录 `DEPLOYMENT.md`。
-
-Redis 脚本集成验证：`python scripts/verify_email_auth_redis.py`，仅使用随机测试键并自动清理，不扫描或清空数据库。Java 单元测试 mock 发信组件，不会发送真实邮件。
-
-## 提交排除规则
-
-禁止提交运行配置（application 配置、环境变量文件、Docker Compose）、SQL、邮箱地址与 SMTP 授权码、密钥、日志及备份。构建清单和不含凭据的配置绑定 Java 源码仍正常维护。已跟踪的运行配置和 SQL 已取消跟踪，本地文件保留。历史提交不在本次改写范围内。
+- 支持游戏资料和游戏版区维护。
+- 支持帖子封禁与解封、评论审核和举报处理。
+- 支持用户封禁、解封及角色分配。
+- 记录后台管理操作，便于查看处理情况。
+- 提供图片上传，支持头像、帖子图片及版区展示素材。
