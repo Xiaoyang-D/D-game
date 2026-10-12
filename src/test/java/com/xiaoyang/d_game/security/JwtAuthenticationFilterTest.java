@@ -13,6 +13,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,7 +54,7 @@ class JwtAuthenticationFilterTest {
         user.setId(7L);
         user.setUsername("admin");
         user.setAuthVersion(1);
-        user.setEmailVerifiedAt(java.time.LocalDateTime.now());
+        user.setEmailVerifiedAt(LocalDateTime.now());
         String token = jwtUtil.generateAccessToken(7L, "admin", List.of("ADMIN"), 1);
         when(userService.getById(7L)).thenReturn(user);
         when(userService.listRoleCodes(7L)).thenReturn(List.of("ADMIN"));
@@ -86,7 +87,7 @@ class JwtAuthenticationFilterTest {
     @Test
     void staleVersionAndLegacyTokensAreRejected() throws Exception {
         User user = new User(); user.setId(7L); user.setAuthVersion(2);
-        user.setEmailVerifiedAt(java.time.LocalDateTime.now());
+        user.setEmailVerifiedAt(LocalDateTime.now());
         when(userService.getById(7L)).thenReturn(user);
         for (String token : List.of(jwtUtil.generateAccessToken(7L, "admin", List.of(), 1),
                 jwtUtil.generateAccessToken(7L, "admin", List.of()))) {

@@ -7,6 +7,8 @@ import com.xiaoyang.d_game.common.enums.ContentStatusEnum;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("post")
@@ -42,7 +44,7 @@ public class Post extends BaseEntity {
     /** 帖子状态，取值见 {@link ContentStatusEnum}。 */
     private Integer status = ContentStatusEnum.APPROVED.getCode();
 
-    private java.time.LocalDateTime scheduledPublishAt;
+    private LocalDateTime scheduledPublishAt;
 
     /** 浏览次数。 */
     private Integer viewCount = 0;

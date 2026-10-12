@@ -1,9 +1,11 @@
 package com.xiaoyang.d_game.entity;
 
+import com.baomidou.mybatisplus.annotation.TableName;
 import com.xiaoyang.d_game.common.BaseEntity;
 import com.xiaoyang.d_game.common.enums.UserStatusEnum;
-import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 @Data
 @TableName("`user`")
@@ -27,7 +29,7 @@ public class User extends BaseEntity {
     private String email;
 
     /** 邮箱归属验证时间；历史邮箱默认未验证。 */
-    private java.time.LocalDateTime emailVerifiedAt;
+    private LocalDateTime emailVerifiedAt;
 
     /** 认证版本，密码重置和迁移后递增。 */
     private Integer authVersion;

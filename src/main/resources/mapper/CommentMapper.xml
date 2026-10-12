@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xiaoyang.d_game.mapper.CommentMapper">
+  <select id="countBefore" resultType="long">
+    SELECT COUNT(id) FROM comment WHERE post_id=#{comment.postId} AND status=2 AND is_deleted=0 AND
+    <choose>
+      <when test="sort == 'LATEST'">
+        (gmt_create&gt;#{comment.gmtCreate} OR (gmt_create=#{comment.gmtCreate} AND id&lt;#{comment.id}))
+      </when>
+      <when test="sort == 'EARLIEST'">
+        (gmt_create&lt;#{comment.gmtCreate} OR (gmt_create=#{comment.gmtCreate} AND id&lt;#{comment.id}))
+      </when>
+      <otherwise>
+        (like_count&gt;#{comment.likeCount} OR (like_count=#{comment.likeCount} AND
+          (gmt_create&lt;#{comment.gmtCreate} OR (gmt_create=#{comment.gmtCreate} AND id&lt;#{comment.id}))))
+      </otherwise>
+    </choose>
+  </select>
+</mapper>

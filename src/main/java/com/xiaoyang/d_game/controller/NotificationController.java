@@ -3,6 +3,9 @@ package com.xiaoyang.d_game.controller;
 import com.xiaoyang.d_game.common.PageResult;
 import com.xiaoyang.d_game.common.Result;
 import com.xiaoyang.d_game.entity.Notification;
+import com.xiaoyang.d_game.dto.NotificationResp;
+import com.xiaoyang.d_game.dto.MessageDtos;
+import org.springframework.web.bind.annotation.RequestBody;
 import com.xiaoyang.d_game.security.RequireLogin;
 import com.xiaoyang.d_game.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,9 +40,10 @@ public class NotificationController {
     @RequireLogin
     @Operation(summary = "通知分页列表")
     @GetMapping
-    public Result<PageResult<Notification>> list(@RequestParam(defaultValue = "1") Long page,
-                                                 @RequestParam(defaultValue = "10") Long size) {
-        return Result.success(notificationService.pageNotifications(page, size));
+    public Result<PageResult<NotificationResp>> list(@RequestParam(defaultValue = "1") Long page,
+                                                 @RequestParam(defaultValue = "10") Long size,
+                                                 @RequestParam(required=false) String category) {
+        return Result.success(notificationService.pageNotifications(page, size, category));
     }
 
     /**
@@ -71,8 +75,14 @@ public class NotificationController {
     @RequireLogin
     @Operation(summary = "全部标记已读")
     @PutMapping("/read-all")
-    public Result<Void> markAllRead() {
-        notificationService.markAllRead();
+    public Result<Void> markAllRead(@RequestParam(required=false) String category) {
+        notificationService.markAllRead(category);
         return Result.success();
+    }
+    @RequireLogin @GetMapping("/settings")
+    public Result<MessageDtos.Settings> settings() { return Result.success(notificationService.settings()); }
+    @RequireLogin @PutMapping("/settings")
+    public Result<Void> settings(@RequestBody MessageDtos.Settings settings) {
+        notificationService.saveSettings(settings); return Result.success();
     }
 }

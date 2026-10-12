@@ -11,8 +11,8 @@ import com.xiaoyang.d_game.dto.GameCreateReq;
 import com.xiaoyang.d_game.dto.GameQueryReq;
 import com.xiaoyang.d_game.dto.GameRankingQueryReq;
 import com.xiaoyang.d_game.dto.GameRatingReq;
-import com.xiaoyang.d_game.dto.GameReviewResp;
 import com.xiaoyang.d_game.dto.GameResp;
+import com.xiaoyang.d_game.dto.GameReviewResp;
 import com.xiaoyang.d_game.entity.Game;
 import com.xiaoyang.d_game.entity.GameCategory;
 import com.xiaoyang.d_game.entity.GameRating;
@@ -26,6 +26,7 @@ import com.xiaoyang.d_game.mapper.GameTagRelMapper;
 import com.xiaoyang.d_game.mapper.TagMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.security.CurrentUser;
+import com.xiaoyang.d_game.service.GameSectionService;
 import com.xiaoyang.d_game.service.GameService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,10 +35,12 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -51,7 +54,7 @@ import java.util.stream.Collectors;
  */
 public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements GameService {
 
-    private final com.xiaoyang.d_game.service.GameSectionService gameSections;
+    private final GameSectionService gameSections;
     private final GameCategoryMapper gameCategoryMapper;
     private final TagMapper tagMapper;
     private final GameTagRelMapper gameTagRelMapper;
@@ -303,7 +306,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         Map<Long, List<Long>> tagIdsByGame = new HashMap<>();
         List<GameTagRel> relations = gameTagRelMapper.selectList(new LambdaQueryWrapper<GameTagRel>()
                 .in(GameTagRel::getGameId, gameIds));
-        relations.forEach(rel -> tagIdsByGame.computeIfAbsent(rel.getGameId(), ignored -> new java.util.ArrayList<>())
+        relations.forEach(rel -> tagIdsByGame.computeIfAbsent(rel.getGameId(), ignored -> new ArrayList<>())
                 .add(rel.getTagId()));
         List<Long> tagIds = relations.stream().map(GameTagRel::getTagId).distinct().toList();
         Map<Long, String> tagNames = tagIds.isEmpty() ? Collections.emptyMap()
@@ -332,7 +335,7 @@ public class GameServiceImpl extends ServiceImpl<GameMapper, Game> implements Ga
         resp.setRatingCount(game.getRatingCount());
         resp.setCategoryName(categoryNames.get(game.getCategoryId()));
         resp.setTags(tagIdsByGame.getOrDefault(game.getId(), Collections.emptyList()).stream()
-                .map(tagNames::get).filter(java.util.Objects::nonNull).toList());
+                .map(tagNames::get).filter(Objects::nonNull).toList());
         return resp;
     }
 }

@@ -25,11 +25,14 @@ import com.xiaoyang.d_game.mapper.UserFavoriteMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
 import com.xiaoyang.d_game.mapper.UserLikeMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
+import com.xiaoyang.d_game.messaging.RealtimeGateway;
 import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.InteractService;
+import com.xiaoyang.d_game.service.MentionService;
 import com.xiaoyang.d_game.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -69,6 +72,8 @@ public class InteractServiceImpl implements InteractService {
     private final UserFavoriteMapper userFavoriteMapper;
     private final UserFollowMapper userFollowMapper;
     private final NotificationService notificationService;
+    private final MentionService mentionService;
+    private final RealtimeGateway realtime;
     private final StringRedisTemplate stringRedisTemplate;
 
     @Override
@@ -81,9 +86,10 @@ public class InteractServiceImpl implements InteractService {
     public Long createComment(CommentCreateReq req) {
         Long userId = currentUserId();
         Post post = lockCommentPost(req.getPostId());
+        Comment parent = null;
         if (req.getParentId() != null && req.getParentId() > 0) {
             // 父评论存在性校验，避免创建悬空楼中楼。
-            Comment parent = lockComment(req.getParentId(), post.getId());
+            parent = lockComment(req.getParentId(), post.getId());
             if (parent == null) {
                 throw new BizException(ResultCode.COMMENT_NOT_FOUND);
             }
@@ -95,13 +101,19 @@ public class InteractServiceImpl implements InteractService {
         comment.setContent(req.getContent());
         comment.setStatus(ContentStatusEnum.APPROVED.getCode());
         commentMapper.insert(comment);
+        mentionService.syncComment(comment.getId(), userId, comment.getContent(), req.getMentions());
 
         // 评论入库后同步增加帖子评论数。
         incrementPostCounter(post.getId(), "comment_count", 1);
 
         // 通知帖子作者有人评论；发送给自己时 NotificationService 会自动忽略。
-        notificationService.sendNotification(post.getUserId(), userId, NotificationTypeEnum.COMMENT.getCode(),
-                "收到新评论", "你的帖子收到了新评论", TargetTypeEnum.POST.getCode(), post.getId());
+        Set<Long> receivers = new LinkedHashSet<>();
+        receivers.add(post.getUserId());
+        if (parent != null) { receivers.add(parent.getUserId()); }
+        for (Long receiver : receivers) {
+            notificationService.sendNotification(receiver, userId, NotificationTypeEnum.COMMENT.getCode(),
+                    "收到新回复", "有人回复了你的内容", TargetTypeEnum.COMMENT.getCode(), comment.getId());
+        }
         return comment.getId();
     }
 
@@ -134,6 +146,8 @@ public class InteractServiceImpl implements InteractService {
         if (comment.getParentId() == null || comment.getParentId() == 0L) {
             int deletedCount = deleteCommentThread(comment);
             incrementPostCounter(post.getId(), "comment_count", -deletedCount);
+            RealtimeGateway.afterCommit(() -> log.info("评论楼层删除成功，operatorId={}，postId={}，commentId={}，deletedCount={}",
+                    userId, post.getId(), commentId, deletedCount));
             return;
         }
 
@@ -151,6 +165,8 @@ public class InteractServiceImpl implements InteractService {
                 .set(Comment::getParentId, parentId)
                 .set(Comment::getGmtModified, LocalDateTime.now()));
         incrementPostCounter(post.getId(), "comment_count", -1);
+        RealtimeGateway.afterCommit(() -> log.info("单条回复删除成功，后续回复已保留，operatorId={}，postId={}，commentId={}",
+                userId, post.getId(), commentId));
     }
 
     /** 按父子关系遍历整个楼层，分页锁定读取保证覆盖其他页及多层回复。 */
@@ -233,6 +249,7 @@ public class InteractServiceImpl implements InteractService {
             case EARLIEST -> wrapper.orderByAsc(Comment::getGmtCreate);
             case LATEST -> wrapper.orderByDesc(Comment::getGmtCreate);
         }
+        wrapper.orderByAsc(Comment::getId);
         commentMapper.selectPage(result, wrapper);
         List<Comment> records = result.getRecords();
         Map<Long, User> userMap = loadCommentUsers(records.stream().map(Comment::getUserId).distinct().toList());
@@ -247,6 +264,7 @@ public class InteractServiceImpl implements InteractService {
                     : StringUtils.hasText(commentAuthor.getNickname()) ? commentAuthor.getNickname() : commentAuthor.getUsername());
             resp.setUserAvatarUrl(commentAuthor == null ? null : commentAuthor.getAvatarUrl());
             resp.setContent(c.getContent());
+            resp.setMentions(mentionService.commentMentions(c.getId()));
             resp.setLikeCount(c.getLikeCount());
             resp.setGmtCreate(c.getGmtCreate());
             return resp;
@@ -399,7 +417,8 @@ public class InteractServiceImpl implements InteractService {
         if (followee == null) {
             throw new BizException(ResultCode.USER_NOT_FOUND);
         }
-        lockFollower(userId);
+        if (Objects.equals(followee.getStatus(), 0)) { throw new BizException(ResultCode.USER_BANNED); }
+        lockFollowPair(userId, followeeId);
         int restored = userFollowMapper.restoreFollow(userId, followeeId);
         if (restored == 0) {
             UserFollow existing = userFollowMapper.selectOne(new LambdaQueryWrapper<UserFollow>()
@@ -414,7 +433,7 @@ public class InteractServiceImpl implements InteractService {
             relation.setFolloweeId(followeeId);
             try {
                 userFollowMapper.insert(relation);
-            } catch (org.springframework.dao.DuplicateKeyException exception) {
+            } catch (DuplicateKeyException exception) {
                 if (userFollowMapper.findActiveFollowForUpdate(userId, followeeId) != null) {
                     return;
                 }
@@ -423,6 +442,15 @@ public class InteractServiceImpl implements InteractService {
         }
         notificationService.sendNotification(followeeId, userId, NotificationTypeEnum.FOLLOW.getCode(),
                 "新增关注", "有人关注了你", null, null);
+        RealtimeGateway.afterCommit(() -> log.info("关注用户成功，userId={}，followeeId={}", userId, followeeId));
+        if (userFollowMapper.selectCount(new LambdaQueryWrapper<UserFollow>().eq(UserFollow::getFollowerId, followeeId)
+                .eq(UserFollow::getFolloweeId, userId)) > 0) {
+            notificationService.sendNotification(userId, followeeId, NotificationTypeEnum.FRIEND.getCode(), "新增好友", "你们已互相关注，可以发送私信", null, null);
+            notificationService.sendNotification(followeeId, userId, NotificationTypeEnum.FRIEND.getCode(), "新增好友", "你们已互相关注，可以发送私信", null, null);
+            RealtimeGateway.afterCommit(() -> log.info("互相关注已成为好友，userId={}，friendId={}", userId, followeeId));
+        }
+        realtime.changed(userId, "FRIEND", null, followeeId);
+        realtime.changed(followeeId, "FRIEND", null, userId);
     }
 
     @Override
@@ -432,7 +460,7 @@ public class InteractServiceImpl implements InteractService {
      */
     public void unfollow(Long followeeId) {
         Long userId = currentUserId();
-        lockFollower(userId);
+        lockFollowPair(userId, followeeId);
         UserFollow existing = userFollowMapper.selectOne(new LambdaQueryWrapper<UserFollow>()
                 .eq(UserFollow::getFollowerId, userId)
                 .eq(UserFollow::getFolloweeId, followeeId)
@@ -441,12 +469,18 @@ public class InteractServiceImpl implements InteractService {
             return;
         }
         userFollowMapper.deleteById(existing.getId());
+        RealtimeGateway.afterCommit(() -> log.info("取消关注成功，相关好友状态已更新，userId={}，followeeId={}", userId, followeeId));
+        realtime.changed(userId, "FRIEND", null, followeeId);
+        realtime.changed(followeeId, "FRIEND", null, userId);
     }
 
-    /** 按关注者串行化关注和取消关注，避免不存在关系时并发插入产生间隙锁冲突。 */
-    private void lockFollower(Long userId) {
-        userMapper.selectOne(new LambdaQueryWrapper<User>()
-                .select(User::getId).eq(User::getId, userId).last("FOR UPDATE"));
+    /** 与私信发送统一按双方 ID 升序锁定用户，串行化关注变更并避免锁顺序反转。 */
+    private void lockFollowPair(Long userId, Long otherId) {
+        if (otherId == null || otherId <= 0 || userId.equals(otherId)) { throw new BizException(ResultCode.BAD_REQUEST); }
+        for (Long id : List.of(Math.min(userId, otherId), Math.max(userId, otherId))) {
+            userMapper.selectOne(new LambdaQueryWrapper<User>()
+                    .select(User::getId).eq(User::getId, id).last("FOR UPDATE"));
+        }
     }
 
     /**

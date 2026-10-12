@@ -3,20 +3,21 @@ package com.xiaoyang.d_game.security;
 import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.ResultCode;
 import com.xiaoyang.d_game.config.JwtProperties;
+import com.xiaoyang.d_game.entity.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
-import jakarta.annotation.PostConstruct;
 import org.springframework.util.StringUtils;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import javax.crypto.SecretKey;
 
 @Component
 @RequiredArgsConstructor
@@ -137,7 +138,7 @@ public class JwtUtil {
     public String generateRefreshToken(Long userId, String username, List<String> roles, Integer version) {
         return buildToken(userId, username, roles, TOKEN_TYPE_REFRESH, jwtProperties.getRefreshExpireMs(), version);
     }
-    public void validateAuthVersion(Claims claims, com.xiaoyang.d_game.entity.User user) {
+    public void validateAuthVersion(Claims claims, User user) {
         Object value = claims.get("authVersion");
         if (user.getEmailVerifiedAt() == null || !(value instanceof Number)
                 || user.getAuthVersion() == null || ((Number) value).intValue() != user.getAuthVersion()) {

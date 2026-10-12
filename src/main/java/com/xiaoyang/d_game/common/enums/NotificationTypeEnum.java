@@ -21,7 +21,9 @@ public enum NotificationTypeEnum {
     SYSTEM(4, "系统通知"),
 
     /** 审核结果通知。 */
-    AUDIT(5, "审核通知");
+    AUDIT(5, "审核通知"),
+    MENTION(6, "提及"),
+    FRIEND(7, "好友");
 
     /** 数据库存储的类型码。 */
     private final int code;

@@ -2,13 +2,15 @@ package com.xiaoyang.d_game.dto;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 import lombok.ToString;
+
+import java.util.Locale;
 /** 验证邮箱后注册。 */
 @Data
 public class RegisterReq {
     @NotBlank @Email @Size(max = 128)
     private String email;
     public void setEmail(String email) {
-        this.email = email == null ? null : email.trim().toLowerCase(java.util.Locale.ROOT);
+        this.email = email == null ? null : email.trim().toLowerCase(Locale.ROOT);
     }
     @NotBlank @Pattern(regexp = "[0-9]{6}") @ToString.Exclude
     private String code;

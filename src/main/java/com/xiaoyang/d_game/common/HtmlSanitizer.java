@@ -21,7 +21,7 @@ public class HtmlSanitizer {
      */
     private static final Whitelist POST_SAFELIST = Whitelist.relaxed()
             .addTags("span", "u", "s", "del", "code", "pre", "hr")
-            .addAttributes("span", "class")
+            .addAttributes("span", "class", "data-type", "data-id", "data-label")
             .addProtocols("a", "href", "http", "https", "mailto")
             .addProtocols("img", "src", "http", "https");
 

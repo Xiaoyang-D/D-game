@@ -14,6 +14,8 @@ import lombok.EqualsAndHashCode;
  * <p>用于记录点赞、评论、关注、系统消息和审核结果等用户可见通知。</p>
  */
 public class Notification extends BaseEntity {
+    private String eventId;
+    private Integer isSilent = 0;
 
     /** 通知接收者用户 ID。 */
     private Long receiverId;

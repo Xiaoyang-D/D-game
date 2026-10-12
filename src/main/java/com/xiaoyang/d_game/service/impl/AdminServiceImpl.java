@@ -29,6 +29,7 @@ import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserRoleRelMapper;
 import com.xiaoyang.d_game.security.CurrentUser;
 import com.xiaoyang.d_game.service.AdminService;
+import com.xiaoyang.d_game.service.MentionService;
 import com.xiaoyang.d_game.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -57,6 +58,7 @@ public class AdminServiceImpl implements AdminService {
     private final UserRoleRelMapper userRoleRelMapper;
     private final AuditLogMapper auditLogMapper;
     private final NotificationService notificationService;
+    private final MentionService mentionService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -98,7 +100,7 @@ public class AdminServiceImpl implements AdminService {
      * <p>帖子状态、审计日志和通知发送在同一事务里完成；通知失败如果抛出运行时异常也会回滚审核结果。</p>
      */
     public void auditPost(Long postId, AuditReq req) {
-        Post post = postMapper.selectById(postId);
+        Post post = postMapper.selectOne(new LambdaQueryWrapper<Post>().eq(Post::getId, postId).last("FOR UPDATE"));
         if (post == null) {
             throw new BizException(ResultCode.POST_NOT_FOUND);
         }
@@ -115,6 +117,8 @@ public class AdminServiceImpl implements AdminService {
         if (changed == 0) {
             throw new BizException(ResultCode.BAD_REQUEST, "帖子状态已变化，请刷新后重试");
         }
+        post.setStatus(status);
+        mentionService.syncPost(post);
         String reason = req.getReason() == null ? "" : req.getReason().trim();
         writeAuditLog(req.getApproved() ? "UNBAN_POST" : "BAN_POST", "POST", postId,
                 (req.getApproved() ? "解封帖子" : "封禁帖子") + (reason.isEmpty() ? "" : ": " + reason));

@@ -155,6 +155,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         resp.setFavoriteCount(favoriteCount == null ? 0L : favoriteCount);
         resp.setSelf(isSelf);
         resp.setFollowing(isFollowing(currentUserId, userId, isSelf));
+        resp.setFriend(Objects.equals(user.getStatus(), UserStatusEnum.NORMAL.getCode())
+                && resp.isFollowing() && isFollowing(userId, currentUserId, isSelf));
         return resp;
     }
 

@@ -17,7 +17,7 @@ public class ScheduledPostPublisher {
         try {
             postService.publishDuePosts();
         } catch (RuntimeException exception) {
-            log.error("Failed to publish scheduled posts", exception);
+            log.error("定时发布帖子任务执行失败，将在下一轮继续检查", exception);
         }
     }
 }

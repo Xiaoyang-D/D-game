@@ -1,6 +1,7 @@
 package com.xiaoyang.d_game.security;
 
 import com.xiaoyang.d_game.common.BizException;
+import com.xiaoyang.d_game.common.ResultCode;
 import com.xiaoyang.d_game.entity.User;
 import com.xiaoyang.d_game.service.UserService;
 import io.jsonwebtoken.Claims;
@@ -9,6 +10,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
+import com.xiaoyang.d_game.common.RequestLoggingFilter;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,8 +23,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 
 @Component
+@Slf4j
 @RequiredArgsConstructor
 /**
  * 从 Authorization 请求头解析 access JWT，并转换为 Spring Security Authentication。
@@ -38,7 +44,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (java.util.Set.of("/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh",
+        if (Set.of("/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/refresh",
                 "/api/v1/auth/email/code", "/api/v1/auth/password/reset", "/api/v1/auth/migration/verify",
                 "/api/v1/auth/migration/email/code", "/api/v1/auth/migration/bind").contains(request.getRequestURI())) {
             filterChain.doFilter(request, response); return;
@@ -51,12 +57,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             Claims claims = jwtUtil.parseAccessToken(token);
             if (tokenRevocationService.isRevoked(claims.getId())) {
-                throw new BizException(com.xiaoyang.d_game.common.ResultCode.UNAUTHORIZED);
+                throw new BizException(ResultCode.UNAUTHORIZED);
             }
             Long userId = jwtUtil.getUserId(claims);
             User user = userService.getById(userId);
             if (user == null) {
-                throw new BizException(com.xiaoyang.d_game.common.ResultCode.UNAUTHORIZED);
+                throw new BizException(ResultCode.UNAUTHORIZED);
             }
             userService.checkUserAvailable(user);
             jwtUtil.validateAuthVersion(claims, user);
@@ -70,6 +76,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(authentication);
             filterChain.doFilter(request, response);
         } catch (BizException exception) {
+            // 只记录业务码与请求编号，不打印认证令牌、声明或异常消息。
+            log.debug("HTTP 令牌认证失败，requestId={}，method={}，uri={}，code={}",
+                    MDC.get(RequestLoggingFilter.REQUEST_ID), request.getMethod(), request.getRequestURI(), exception.getCode());
             SecurityContextHolder.clearContext();
             authenticationEntryPoint.commence(request, response, null);
         }

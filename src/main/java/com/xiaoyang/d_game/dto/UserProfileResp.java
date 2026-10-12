@@ -15,6 +15,8 @@ import java.time.LocalDateTime;
  * 前端可直接拿它渲染“公开主页”的头图、资料区和统计区。</p>
  */
 public class UserProfileResp {
+    @JsonProperty("isFriend")
+    private boolean friend;
 
     /**
      * 用户 ID。

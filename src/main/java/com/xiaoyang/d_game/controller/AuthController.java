@@ -3,6 +3,8 @@ package com.xiaoyang.d_game.controller;
 import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.Result;
 import com.xiaoyang.d_game.common.ResultCode;
+import com.xiaoyang.d_game.config.EmailAuthProperties;
+import com.xiaoyang.d_game.dto.EmailAuthReq;
 import com.xiaoyang.d_game.dto.LoginReq;
 import com.xiaoyang.d_game.dto.RefreshTokenReq;
 import com.xiaoyang.d_game.dto.RegisterReq;
@@ -10,6 +12,7 @@ import com.xiaoyang.d_game.dto.TokenResp;
 import com.xiaoyang.d_game.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
@@ -26,9 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
-    private final com.xiaoyang.d_game.config.EmailAuthProperties emailProperties;
+    private final EmailAuthProperties emailProperties;
 
-    private String clientIp(jakarta.servlet.http.HttpServletRequest request) {
+    private String clientIp(HttpServletRequest request) {
         String peer = request.getRemoteAddr();
         String forwarded = request.getHeader("X-Real-IP");
         if (emailProperties.getTrustedProxies().contains(peer) && forwarded != null
@@ -37,27 +40,27 @@ public class AuthController {
     }
 
     @PostMapping("/email/code")
-    public Result<Void> sendCode(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.SendCode req,
-                                jakarta.servlet.http.HttpServletRequest request) {
+    public Result<Void> sendCode(@Valid @RequestBody EmailAuthReq.SendCode req,
+                                HttpServletRequest request) {
         authService.sendEmailCode(req, clientIp(request)); return Result.success();
     }
     @PostMapping("/password/reset")
-    public Result<Void> resetPassword(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.ResetPassword req) {
+    public Result<Void> resetPassword(@Valid @RequestBody EmailAuthReq.ResetPassword req) {
         authService.resetPassword(req); return Result.success();
     }
     @PostMapping("/migration/verify")
-    public Result<com.xiaoyang.d_game.dto.EmailAuthReq.MigrationToken> verifyMigration(
-            @Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.VerifyMigration req,
-            jakarta.servlet.http.HttpServletRequest request) {
+    public Result<EmailAuthReq.MigrationToken> verifyMigration(
+            @Valid @RequestBody EmailAuthReq.VerifyMigration req,
+            HttpServletRequest request) {
         return Result.success(authService.verifyMigration(req, clientIp(request)));
     }
     @PostMapping("/migration/email/code")
-    public Result<Void> migrationCode(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.MigrationEmail req,
-                                     jakarta.servlet.http.HttpServletRequest request) {
+    public Result<Void> migrationCode(@Valid @RequestBody EmailAuthReq.MigrationEmail req,
+                                     HttpServletRequest request) {
         authService.sendMigrationCode(req, clientIp(request)); return Result.success();
     }
     @PostMapping("/migration/bind")
-    public Result<TokenResp> bindMigration(@Valid @RequestBody com.xiaoyang.d_game.dto.EmailAuthReq.BindMigration req) {
+    public Result<TokenResp> bindMigration(@Valid @RequestBody EmailAuthReq.BindMigration req) {
         return Result.success(authService.bindMigration(req));
     }
 

@@ -1,5 +1,6 @@
 package com.xiaoyang.d_game.service.impl;
 import com.xiaoyang.d_game.common.BizException;
+import com.xiaoyang.d_game.common.ResultCode;
 import com.xiaoyang.d_game.config.JwtProperties;
 import com.xiaoyang.d_game.dto.*;
 import com.xiaoyang.d_game.dto.EmailAuthReq.Purpose;
@@ -9,14 +10,18 @@ import com.xiaoyang.d_game.mapper.*;
 import com.xiaoyang.d_game.security.*;
 import com.xiaoyang.d_game.service.UserService;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
 import java.time.LocalDateTime;
 import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 class EmailAuthServiceTest {
     UserService users; UserMapper mapper; EmailCodeManager codes; PasswordEncoder passwords;
     StringRedisTemplate redis; ValueOperations<String,String> values; JwtUtil jwt; AuthServiceImpl auth;
@@ -66,7 +71,7 @@ class EmailAuthServiceTest {
         verify(mapper).resetPassword(7L,1,"newhash");
     }
     @Test void invalidCodeCannotChangePassword() {
-        doThrow(new BizException(com.xiaoyang.d_game.common.ResultCode.BAD_REQUEST)).when(codes).consume(any(),any(),any(),any());
+        doThrow(new BizException(ResultCode.BAD_REQUEST)).when(codes).consume(any(),any(),any(),any());
         EmailAuthReq.ResetPassword req=new EmailAuthReq.ResetPassword(); req.setEmail("person@example.com"); req.setCode("123456"); req.setNewPassword("newpassword");
         assertThrows(BizException.class,()->auth.resetPassword(req)); verifyNoInteractions(mapper);
     }
@@ -109,7 +114,7 @@ class EmailAuthServiceTest {
         SysRole role=new SysRole(); role.setId(2L); when(roles.selectOne(any())).thenReturn(role);
         when(users.listRoleCodes(9L)).thenReturn(List.of("USER"));
         TokenResp result=auth.register(registration());
-        var capture=org.mockito.ArgumentCaptor.forClass(User.class); verify(users).save(capture.capture());
+        var capture=ArgumentCaptor.forClass(User.class); verify(users).save(capture.capture());
         assertTrue(capture.getValue().getUsername().matches("u_[0-9a-f]{32}"));
         assertNotNull(capture.getValue().getEmailVerifiedAt()); assertEquals("hash",capture.getValue().getPasswordHash());
         assertEquals("9",jwt.parseToken(result.getAccessToken()).getSubject());
@@ -117,7 +122,7 @@ class EmailAuthServiceTest {
         verify(codes).consume("person@example.com",Purpose.REGISTER,"","123456");
     }
     @Test void concurrentEmailUniqueConflictBecomesBusinessError() {
-        when(users.save(any(User.class))).thenThrow(new org.springframework.dao.DuplicateKeyException("duplicate"));
+        when(users.save(any(User.class))).thenThrow(new DuplicateKeyException("duplicate"));
         assertThrows(BizException.class,()->auth.register(registration())); verifyNoInteractions(relations);
     }
     @Test void migrationCompareAndSetRejectsSecondBinding() {

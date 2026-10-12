@@ -19,9 +19,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /** 管理游戏版区及独立分区设置，事务保留已有帖子关联。 */
 @Service
@@ -124,7 +126,7 @@ public class GameSectionService {
     public Long createBoard(Long gameId, GameBoardSaveReq req) {
         requireGame(gameId);
         // 全局 board 表名称唯一；私有分区使用内部名称，展示名称仅保存在游戏设置中。
-        Board board = new Board(); board.setName("section-" + java.util.UUID.randomUUID()); board.setScopePrivate(true);
+        Board board = new Board(); board.setName("section-" + UUID.randomUUID()); board.setScopePrivate(true);
         board.setPublishPolicy(req.getPublishPolicy()); boards.insert(board);
         GameBoardSetting setting = new GameBoardSetting();
         BeanUtils.copyProperties(req, setting); setting.setName(req.getName().trim());

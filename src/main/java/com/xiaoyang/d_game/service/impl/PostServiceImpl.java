@@ -5,26 +5,27 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.xiaoyang.d_game.common.BizException;
+import com.xiaoyang.d_game.common.HtmlSanitizer;
 import com.xiaoyang.d_game.common.PageResult;
 import com.xiaoyang.d_game.common.ResultCode;
-import com.xiaoyang.d_game.common.HtmlSanitizer;
 import com.xiaoyang.d_game.common.enums.ContentStatusEnum;
+import com.xiaoyang.d_game.common.enums.PostRankingTypeEnum;
 import com.xiaoyang.d_game.common.enums.UserStatusEnum;
 import com.xiaoyang.d_game.dto.BannedAuthorPostQueryReq;
 import com.xiaoyang.d_game.dto.PostCollectionResp;
-import com.xiaoyang.d_game.common.enums.PostRankingTypeEnum;
 import com.xiaoyang.d_game.dto.PostCreateReq;
 import com.xiaoyang.d_game.dto.PostDraftResp;
 import com.xiaoyang.d_game.dto.PostDraftSaveReq;
 import com.xiaoyang.d_game.dto.PostManageItemResp;
 import com.xiaoyang.d_game.dto.PostManagePageResp;
+import com.xiaoyang.d_game.dto.PostPublishReq;
 import com.xiaoyang.d_game.dto.PostQueryReq;
 import com.xiaoyang.d_game.dto.PostRankingQueryReq;
 import com.xiaoyang.d_game.dto.PostResp;
-import com.xiaoyang.d_game.dto.PostPublishReq;
 import com.xiaoyang.d_game.dto.PostTopicResp;
 import com.xiaoyang.d_game.entity.Board;
 import com.xiaoyang.d_game.entity.Game;
+import com.xiaoyang.d_game.entity.GameBoardSetting;
 import com.xiaoyang.d_game.entity.Post;
 import com.xiaoyang.d_game.entity.PostCollection;
 import com.xiaoyang.d_game.entity.PostTopic;
@@ -33,13 +34,15 @@ import com.xiaoyang.d_game.entity.User;
 import com.xiaoyang.d_game.entity.UserFollow;
 import com.xiaoyang.d_game.mapper.BoardMapper;
 import com.xiaoyang.d_game.mapper.GameMapper;
-import com.xiaoyang.d_game.mapper.PostMapper;
 import com.xiaoyang.d_game.mapper.PostCollectionMapper;
+import com.xiaoyang.d_game.mapper.PostMapper;
 import com.xiaoyang.d_game.mapper.PostTopicMapper;
 import com.xiaoyang.d_game.mapper.PostTopicRelMapper;
-import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
+import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.security.CurrentUser;
+import com.xiaoyang.d_game.service.GameSectionService;
+import com.xiaoyang.d_game.service.MentionService;
 import com.xiaoyang.d_game.service.PostService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,16 +50,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.Collections;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 
 @Service
 @Slf4j
@@ -71,7 +74,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
 
     private static final ZoneId SHANGHAI_ZONE = ZoneId.of("Asia/Shanghai");
 
-    private final com.xiaoyang.d_game.service.GameSectionService gameSections;
+    private final GameSectionService gameSections;
     private final BoardMapper boardMapper;
     private final GameMapper gameMapper;
     private final UserMapper userMapper;
@@ -80,6 +83,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
     private final PostTopicMapper postTopicMapper;
     private final PostTopicRelMapper postTopicRelMapper;
     private final PostCollectionMapper postCollectionMapper;
+    private final MentionService mentionService;
 
     @Override
     /**
@@ -88,8 +92,9 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
      * <p>只查询审核通过的帖子，避免待审核或被拒绝内容出现在公共列表。</p>
      */
     public PageResult<PostResp> pagePosts(PostQueryReq req) {
-        log.debug("分页查询帖子, boardId={}, gameId={}, keyword={}, page={}, size={}",
-                req.getBoardId(), req.getGameId(), req.getKeyword(), req.getPage(), req.getSize());
+        // 只记录是否提供搜索词，不记录用户输入，避免敏感内容或换行进入日志。
+        log.debug("分页查询帖子，boardId={}，gameId={}，包含搜索词={}，page={}，size={}",
+                req.getBoardId(), req.getGameId(), StringUtils.hasText(req.getKeyword()), req.getPage(), req.getSize());
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Post::getStatus, ContentStatusEnum.APPROVED.getCode());
         if (req.getBoardId() != null) {
@@ -315,6 +320,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (!updated) {
             throw new BizException(ResultCode.BAD_REQUEST, "帖子状态已变化，请刷新后重试");
         }
+        mentionService.syncPost(post);
         replaceTopics(post.getId(), req.getTopicNames());
         return toManageItemResp(post);
     }
@@ -398,8 +404,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
-        log.debug("开始创建帖子, userId={}, boardId={}, gameId={}, title={}",
-                userId, req.getBoardId(), req.getGameId(), req.getTitle());
+        log.debug("开始创建帖子，userId={}，boardId={}，gameId={}，标题长度={}",
+                userId, req.getBoardId(), req.getGameId(), req.getTitle() == null ? 0 : req.getTitle().length());
         Board board = boardMapper.selectById(req.getBoardId());
         if (board == null) {
             throw new BizException(ResultCode.BOARD_NOT_FOUND);
@@ -414,9 +420,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         post.setGameId(req.getGameId());
         post.setUserId(userId);
         post.setTitle(req.getTitle());
-        post.setContent(htmlSanitizer.sanitizePostContent(req.getContent()));
+        post.setContent(mentionService.normalizePost(req.getContent()));
         post.setStatus(ContentStatusEnum.APPROVED.getCode());
         save(post);
+        mentionService.syncPost(post);
         log.debug("创建帖子成功, postId={}, userId={}, status={}", post.getId(), userId, post.getStatus());
         return String.valueOf(post.getId());
     }
@@ -432,6 +439,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
                 ? ContentStatusEnum.APPROVED.getCode()
                 : ContentStatusEnum.DRAFT.getCode());
         save(post);
+        mentionService.syncPost(post);
         replaceTopics(post.getId(), req.getTopicNames());
         return String.valueOf(post.getId());
     }
@@ -471,6 +479,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         applyDraftFields(post, req);
         post.setStatus(ContentStatusEnum.DRAFT.getCode());
         save(post);
+        mentionService.syncPost(post);
         replaceTopics(post.getId(), req.getTopicNames());
         return toDraftResp(post);
     }
@@ -486,7 +495,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
             validateScheduledDraft(req, userId);
         }
         applyDraftFields(post, req);
-        updateById(post);
+        boolean updated = update(post, new LambdaUpdateWrapper<Post>().eq(Post::getId, postId)
+                .eq(Post::getUserId, userId).eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode()));
+        if (!updated) { throw new BizException(ResultCode.BAD_REQUEST, "草稿已发布或状态已变化，请刷新后重试"); }
+        mentionService.syncPost(post);
         replaceTopics(post.getId(), req.getTopicNames());
         return toDraftResp(post);
     }
@@ -508,7 +520,10 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         post.setStatus(req.getScheduledPublishAt() == null
                 ? ContentStatusEnum.APPROVED.getCode()
                 : ContentStatusEnum.DRAFT.getCode());
-        updateById(post);
+        boolean published = update(post, new LambdaUpdateWrapper<Post>().eq(Post::getId, postId)
+                .eq(Post::getUserId, userId).eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode()));
+        if (!published) { throw new BizException(ResultCode.BAD_REQUEST, "草稿已发布或状态已变化，请刷新后重试"); }
+        mentionService.syncPost(post);
         replaceTopics(post.getId(), req.getTopicNames());
         return String.valueOf(post.getId());
     }
@@ -561,7 +576,8 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
                 .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
                 .isNotNull(Post::getScheduledPublishAt)
                 .le(Post::getScheduledPublishAt, now)
-                .last("LIMIT 100"));
+                // 锁定后读取到期正文，避免发布与草稿编辑并发时通知旧的提及对象。
+                .last("LIMIT 100 FOR UPDATE"));
         for (Post post : duePosts) {
             try {
                 Board board = boardMapper.selectById(post.getBoardId());
@@ -574,11 +590,12 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
                 log.info("定时发布已取消，版区或发布权限变化，postId={}", post.getId());
                 continue;
             }
-            update(new LambdaUpdateWrapper<Post>()
+            boolean published = update(new LambdaUpdateWrapper<Post>()
                     .eq(Post::getId, post.getId())
                     .eq(Post::getStatus, ContentStatusEnum.DRAFT.getCode())
                     .set(Post::getStatus, ContentStatusEnum.APPROVED.getCode())
                     .set(Post::getScheduledPublishAt, null));
+            if (published) { post.setStatus(2); mentionService.syncPost(post); }
         }
     }
 
@@ -674,7 +691,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
      */
     private String boardDisplayName(Long gameId, Board board) {
         if (gameId == null) { return board.getName(); }
-        com.xiaoyang.d_game.entity.GameBoardSetting setting = gameSections.findSetting(gameId, board.getId());
+        GameBoardSetting setting = gameSections.findSetting(gameId, board.getId());
         return setting == null ? board.getName() : setting.getName();
     }
 
@@ -724,7 +741,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         post.setGameId(req.getGameId());
         post.setCollectionId(req.getCollectionId());
         post.setTitle(req.getTitle() == null ? "" : req.getTitle().trim());
-        post.setContent(htmlSanitizer.sanitizePostContent(req.getContent() == null ? "" : req.getContent()));
+        post.setContent(mentionService.normalizePost(req.getContent() == null ? "" : req.getContent()));
         post.setIsOriginal(Boolean.TRUE.equals(req.getIsOriginal()));
         post.setContainsAiGenerated(Boolean.TRUE.equals(req.getContainsAiGenerated()));
         post.setScheduledPublishAt(req.getScheduledPublishAt());
@@ -736,7 +753,7 @@ public class PostServiceImpl extends ServiceImpl<PostMapper, Post> implements Po
         post.setGameId(req.getGameId());
         post.setCollectionId(req.getCollectionId());
         post.setTitle(req.getTitle().trim());
-        post.setContent(htmlSanitizer.sanitizePostContent(req.getContent()));
+        post.setContent(mentionService.normalizePost(req.getContent()));
         post.setIsOriginal(Boolean.TRUE.equals(req.getIsOriginal()));
         post.setContainsAiGenerated(Boolean.TRUE.equals(req.getContainsAiGenerated()));
         post.setScheduledPublishAt(req.getScheduledPublishAt());

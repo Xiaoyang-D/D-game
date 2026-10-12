@@ -20,6 +20,8 @@ public class NotificationEvent implements Serializable {
 
     /** 事件版本，方便后续消息结构升级时做兼容。 */
     private Integer version = 1;
+    /** 事件创建时冻结用户偏好，避免队列延迟改变静默语义。 */
+    private Integer isSilent = 0;
 
     /** 事件产生时间。 */
     private LocalDateTime occurredAt = LocalDateTime.now();

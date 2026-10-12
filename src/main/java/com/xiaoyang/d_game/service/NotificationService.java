@@ -3,6 +3,8 @@ package com.xiaoyang.d_game.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.xiaoyang.d_game.common.PageResult;
 import com.xiaoyang.d_game.entity.Notification;
+import com.xiaoyang.d_game.dto.NotificationResp;
+import com.xiaoyang.d_game.dto.MessageDtos;
 
 /**
  * 站内通知服务接口。
@@ -28,7 +30,12 @@ public interface NotificationService extends IService<Notification> {
     /**
      * 分页查询当前用户通知。
      */
-    PageResult<Notification> pageNotifications(Long page, Long size);
+    PageResult<NotificationResp> pageNotifications(Long page, Long size);
+    PageResult<NotificationResp> pageNotifications(Long page, Long size, String category);
+    long categoryUnread(String category);
+    MessageDtos.Settings settings();
+    void saveSettings(MessageDtos.Settings settings);
+    void markAllRead(String category);
 
     /**
      * 查询当前用户未读通知数量。

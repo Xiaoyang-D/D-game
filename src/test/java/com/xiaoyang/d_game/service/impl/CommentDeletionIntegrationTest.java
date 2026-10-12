@@ -13,8 +13,10 @@ import com.xiaoyang.d_game.mapper.UserFavoriteMapper;
 import com.xiaoyang.d_game.mapper.UserFollowMapper;
 import com.xiaoyang.d_game.mapper.UserLikeMapper;
 import com.xiaoyang.d_game.mapper.UserMapper;
+import com.xiaoyang.d_game.messaging.RealtimeGateway;
 import com.xiaoyang.d_game.security.CurrentUserPrincipal;
 import com.xiaoyang.d_game.service.InteractService;
+import com.xiaoyang.d_game.service.MentionService;
 import com.xiaoyang.d_game.service.NotificationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,15 +37,18 @@ import org.springframework.transaction.annotation.AnnotationTransactionAttribute
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.sql.Driver;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -60,7 +65,7 @@ class CommentDeletionIntegrationTest {
 
     @BeforeEach
     void initializeIsolatedDatabase() throws Exception {
-        driverLoader = new URLClassLoader(new java.net.URL[]{
+        driverLoader = new URLClassLoader(new URL[]{
                 Path.of(System.getenv("COMMENT_TEST_DRIVER_JAR")).toUri().toURL()
         }, getClass().getClassLoader());
         Driver driver = (Driver) Class.forName("org.h2.Driver", true, driverLoader).getConstructor().newInstance();
@@ -91,7 +96,8 @@ class CommentDeletionIntegrationTest {
         comments = session.getMapper(CommentMapper.class);
         var target = new InteractServiceImpl(comments, session.getMapper(PostMapper.class), mock(UserMapper.class),
                 mock(UserLikeMapper.class), mock(UserFavoriteMapper.class), mock(UserFollowMapper.class),
-                mock(NotificationService.class), mock(StringRedisTemplate.class));
+                mock(NotificationService.class), mock(MentionService.class),
+                mock(RealtimeGateway.class), mock(StringRedisTemplate.class));
         transactions = new DataSourceTransactionManager(source);
         var interceptor = new TransactionInterceptor();
         interceptor.setTransactionManager(transactions);
@@ -274,7 +280,7 @@ class CommentDeletionIntegrationTest {
 
     @Test
     void floorDeletionCoversMultipleBatchesHiddenRepliesAndOtherPages() {
-        List<Object[]> rows = new java.util.ArrayList<>();
+        List<Object[]> rows = new ArrayList<>();
         for (long id = 1000; id < 1501; id++) {
             rows.add(new Object[]{id, 1L, 50L, 101L, "batch reply", 3});
         }
@@ -322,7 +328,7 @@ class CommentDeletionIntegrationTest {
                 }
             });
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS));
-            assertThrows(java.util.concurrent.TimeoutException.class, () -> secondResult.get(200, TimeUnit.MILLISECONDS));
+            assertThrows(TimeoutException.class, () -> secondResult.get(200, TimeUnit.MILLISECONDS));
             release.countDown();
             firstResult.get(5, TimeUnit.SECONDS);
             secondResult.get(5, TimeUnit.SECONDS);

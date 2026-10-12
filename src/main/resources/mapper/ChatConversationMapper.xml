@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xiaoyang.d_game.mapper.ChatConversationMapper">
+  <select id="friends" resultType="com.xiaoyang.d_game.dto.MessageDtos$UserBrief">
+    SELECT u.id, u.nickname, u.avatar_url
+    FROM user_follow f JOIN user_follow r ON r.follower_id=f.followee_id
+      AND r.followee_id=f.follower_id AND r.is_deleted=0
+    JOIN `user` u ON u.id=f.followee_id AND u.is_deleted=0 AND u.status=1
+    WHERE f.follower_id=#{userId} AND f.is_deleted=0
+    <if test="q != null and q != ''">AND LOCATE(#{q}, u.nickname)&gt;0</if>
+    ORDER BY u.nickname, u.id
+  </select>
+  <select id="unread" resultType="long">
+    SELECT COUNT(m.id) FROM chat_member cm
+    JOIN chat_message m ON m.conversation_id=cm.conversation_id AND m.is_deleted=0
+    WHERE cm.user_id=#{userId} AND cm.is_deleted=0 AND cm.hidden=0
+      AND m.sender_id&lt;&gt;#{userId} AND m.recalled=0
+      AND m.seq&gt;cm.read_seq AND m.seq&gt;cm.clear_seq
+  </select>
+</mapper>

@@ -32,7 +32,14 @@ public class NotificationEventConsumer {
     public void consume(NotificationEvent event) {
         log.debug("开始消费通知事件, eventId={}, receiverId={}, type={}",
                 event.getEventId(), event.getReceiverId(), event.getType());
-        notificationEventHandler.handle(event);
+        try {
+            notificationEventHandler.handle(event);
+        } catch (RuntimeException exception) {
+            // 保留失败堆栈并继续交给监听容器处理，不能吞异常后把消息确认成功。
+            log.error("通知消费失败，eventId={}，receiverId={}，type={}",
+                    event.getEventId(), event.getReceiverId(), event.getType(), exception);
+            throw exception;
+        }
         log.debug("通知事件消费完成, eventId={}", event.getEventId());
     }
 }

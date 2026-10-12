@@ -1,5 +1,6 @@
 package com.xiaoyang.d_game.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.xiaoyang.d_game.common.BaseEntity;
 import lombok.Data;
@@ -27,12 +28,12 @@ public class Board extends BaseEntity {
     private Boolean scopePrivate = false;
     /** 未指定游戏时使用的发布权限。 */
     private String publishPolicy = "LOGIN";
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private String iconKey = "forum";
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private String iconUrl = "";
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private String bannerUrl = "";
-    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @TableField(exist = false)
     private Boolean enabled = true;
 }

@@ -4,6 +4,7 @@ import com.xiaoyang.d_game.dto.GameResp;
 import com.xiaoyang.d_game.entity.Game;
 import com.xiaoyang.d_game.entity.GameCategory;
 import com.xiaoyang.d_game.mapper.*;
+import com.xiaoyang.d_game.service.GameSectionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -19,7 +20,7 @@ class GameServiceImplTest {
         GameCategoryMapper categories = mock(GameCategoryMapper.class);
         TagMapper tags = mock(TagMapper.class);
         GameTagRelMapper relations = mock(GameTagRelMapper.class);
-        GameServiceImpl service = new GameServiceImpl(categories, tags, relations,
+        GameServiceImpl service = new GameServiceImpl(mock(GameSectionService.class), categories, tags, relations,
                 mock(GameRatingMapper.class), mock(UserMapper.class));
         Game game = new Game();
         game.setId(2200000000000000001L);

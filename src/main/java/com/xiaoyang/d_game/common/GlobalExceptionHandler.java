@@ -2,6 +2,9 @@ package com.xiaoyang.d_game.common;
 
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import com.xiaoyang.d_game.security.CurrentUser;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -26,14 +29,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     @ResponseStatus(HttpStatus.OK)
     /** 处理方法安全或过滤链抛出的认证失败，统一返回未登录业务码。 */
-    public Result<Void> handleAuthenticationException(AuthenticationException e) {
+    public Result<Void> handleAuthenticationException(AuthenticationException e, HttpServletRequest request) {
+        log.debug("请求未通过登录校验，requestId={}，method={}，uri={}",
+                MDC.get(RequestLoggingFilter.REQUEST_ID), request.getMethod(), request.getRequestURI());
         return Result.fail(ResultCode.UNAUTHORIZED);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.OK)
     /** 区分匿名访问和已登录越权，分别返回 401 或 403。 */
-    public Result<Void> handleAccessDeniedException(AccessDeniedException e) {
+    public Result<Void> handleAccessDeniedException(AccessDeniedException e, HttpServletRequest request) {
+        log.debug("请求权限不足，requestId={}，method={}，uri={}，userId={}",
+                MDC.get(RequestLoggingFilter.REQUEST_ID), request.getMethod(), request.getRequestURI(), CurrentUser.getOptionalUserId());
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || "anonymousUser".equals(authentication.getPrincipal())) {
@@ -49,8 +56,10 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BizException.class)
     @ResponseStatus(HttpStatus.OK)
-    public Result<Void> handleBizException(BizException e) {
-        log.warn("业务异常: code={}, message={}", e.getCode(), e.getMessage());
+    public Result<Void> handleBizException(BizException e, HttpServletRequest request) {
+        log.warn("业务请求失败，requestId={}，method={}，uri={}，userId={}，code={}，message={}",
+                MDC.get(RequestLoggingFilter.REQUEST_ID), request.getMethod(), request.getRequestURI(),
+                CurrentUser.getOptionalUserId(), e.getCode(), e.getMessage());
         return Result.fail(e.getCode(), e.getMessage());
     }
 
@@ -62,7 +71,10 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class, ConstraintViolationException.class})
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public Result<Void> handleValidationException(Exception e) {
+    public Result<Void> handleValidationException(Exception e, HttpServletRequest request) {
+        // 校验异常可能携带被拒绝的密码或正文，只记录异常类型，不打印绑定结果和完整堆栈。
+        log.debug("请求参数校验失败，requestId={}，method={}，uri={}，异常类型={}",
+                MDC.get(RequestLoggingFilter.REQUEST_ID), request.getMethod(), request.getRequestURI(), e.getClass().getSimpleName());
         String message = "请求参数错误";
         if (e instanceof MethodArgumentNotValidException ex && ex.getBindingResult().getFieldError() != null) {
             message = ex.getBindingResult().getFieldError().getDefaultMessage();
@@ -81,8 +93,9 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public Result<Void> handleException(Exception e) {
-        log.error("系统异常", e);
+    public Result<Void> handleException(Exception e, HttpServletRequest request) {
+        log.error("接口系统异常，requestId={}，method={}，uri={}，userId={}",
+                MDC.get(RequestLoggingFilter.REQUEST_ID), request.getMethod(), request.getRequestURI(), CurrentUser.getOptionalUserId(), e);
         return Result.fail(ResultCode.INTERNAL_ERROR);
     }
 }

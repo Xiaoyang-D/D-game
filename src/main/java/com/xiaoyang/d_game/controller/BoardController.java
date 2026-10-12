@@ -3,11 +3,13 @@ package com.xiaoyang.d_game.controller;
 import com.xiaoyang.d_game.common.Result;
 import com.xiaoyang.d_game.entity.Board;
 import com.xiaoyang.d_game.service.BoardService;
+import com.xiaoyang.d_game.service.GameSectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -24,7 +26,7 @@ import java.util.List;
 public class BoardController {
 
     private final BoardService boardService;
-    private final com.xiaoyang.d_game.service.GameSectionService gameSections;
+    private final GameSectionService gameSections;
 
     /**
      * 查询版块列表。
@@ -33,7 +35,7 @@ public class BoardController {
      */
     @Operation(summary = "版块列表")
     @GetMapping
-    public Result<List<Board>> list(@org.springframework.web.bind.annotation.RequestParam(required = false) Long gameId) {
+    public Result<List<Board>> list(@RequestParam(required = false) Long gameId) {
         return Result.success(gameId == null ? boardService.listBoards() : gameSections.publicBoards(gameId));
     }
 }

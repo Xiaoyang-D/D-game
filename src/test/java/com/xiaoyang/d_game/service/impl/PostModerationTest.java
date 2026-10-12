@@ -1,31 +1,53 @@
 package com.xiaoyang.d_game.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.HtmlSanitizer;
 import com.xiaoyang.d_game.dto.AuditReq;
 import com.xiaoyang.d_game.dto.PostCreateReq;
+import com.xiaoyang.d_game.dto.PostPublishReq;
+import com.xiaoyang.d_game.dto.PostQueryReq;
+import com.xiaoyang.d_game.entity.AuditLog;
 import com.xiaoyang.d_game.entity.Board;
 import com.xiaoyang.d_game.entity.Post;
+import com.xiaoyang.d_game.entity.PostTopicRel;
 import com.xiaoyang.d_game.mapper.*;
 import com.xiaoyang.d_game.security.CurrentUserPrincipal;
+import com.xiaoyang.d_game.service.GameSectionService;
+import com.xiaoyang.d_game.service.MentionService;
 import com.xiaoyang.d_game.service.NotificationService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.*;
+import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+
 import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class PostModerationTest {
+    private static MentionService mentions() {
+        return mock(MentionService.class, invocation ->
+                invocation.getMethod().getName().equals("normalizePost") ? invocation.getArgument(0)
+                        : Answers.RETURNS_DEFAULTS.answer(invocation));
+    }
+
     private PostMapper posts;
     private AuditLogMapper logs;
     private NotificationService notifications;
     private AdminServiceImpl admin;
+
+    private GameSectionService policyService() {
+        return new GameSectionService(mock(GameMapper.class), mock(BoardMapper.class),
+                mock(GameBoardSettingMapper.class), mock(GameCategoryMapper.class));
+    }
 
     @BeforeEach
     void setup() {
@@ -38,7 +60,7 @@ class PostModerationTest {
         logs = mock(AuditLogMapper.class);
         notifications = mock(NotificationService.class);
         admin = new AdminServiceImpl(mock(UserMapper.class), posts, mock(CommentMapper.class),
-                mock(SysRoleMapper.class), mock(UserRoleRelMapper.class), logs, notifications);
+                mock(SysRoleMapper.class), mock(UserRoleRelMapper.class), logs, notifications, mentions());
     }
 
     @AfterEach
@@ -50,6 +72,7 @@ class PostModerationTest {
         post.setUserId(30L);
         post.setStatus(status);
         when(posts.selectById(20L)).thenReturn(post);
+        when(posts.selectOne(any(Wrapper.class))).thenReturn(post);
     }
 
     private AuditReq request(boolean approved) {
@@ -64,7 +87,7 @@ class PostModerationTest {
         prepare(2, false);
         when(posts.update(isNull(), any(Wrapper.class))).thenReturn(1);
         admin.auditPost(20L, request(false));
-        var log = ArgumentCaptor.forClass(com.xiaoyang.d_game.entity.AuditLog.class);
+        var log = ArgumentCaptor.forClass(AuditLog.class);
         verify(logs).insert(log.capture());
         assertEquals("BAN_POST", log.getValue().getAction());
         verify(notifications).sendNotification(eq(30L), eq(10L), anyInt(), anyString(), contains("封禁"), anyInt(), eq(20L));
@@ -75,7 +98,7 @@ class PostModerationTest {
         prepare(3, true);
         when(posts.update(isNull(), any(Wrapper.class))).thenReturn(1);
         admin.auditPost(20L, request(true));
-        var log = ArgumentCaptor.forClass(com.xiaoyang.d_game.entity.AuditLog.class);
+        var log = ArgumentCaptor.forClass(AuditLog.class);
         verify(logs).insert(log.capture());
         assertEquals("UNBAN_POST", log.getValue().getAction());
     }
@@ -111,16 +134,16 @@ class PostModerationTest {
         when(sanitizer.sanitizePostContent(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
         PostTopicRelMapper relations = mock(PostTopicRelMapper.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), "topic-test"),
-                com.xiaoyang.d_game.entity.PostTopicRel.class);
-        PostServiceImpl service = spy(new PostServiceImpl(boards, mock(GameMapper.class), mock(UserMapper.class),
-                mock(UserFollowMapper.class), sanitizer, mock(PostTopicMapper.class), relations, mock(PostCollectionMapper.class)));
+                PostTopicRel.class);
+        PostServiceImpl service = spy(new PostServiceImpl(policyService(), boards, mock(GameMapper.class), mock(UserMapper.class),
+                mock(UserFollowMapper.class), sanitizer, mock(PostTopicMapper.class), relations, mock(PostCollectionMapper.class), mentions()));
         Post post = new Post();
         post.setId(20L);
         post.setUserId(10L);
         post.setStatus(3);
         doReturn(post).when(service).getById(20L);
         doReturn(true).when(service).update(any(Post.class), any(Wrapper.class));
-        var request = new com.xiaoyang.d_game.dto.PostPublishReq();
+        var request = new PostPublishReq();
         request.setBoardId(1L);
         request.setTitle("编辑帖子");
         request.setContent("修改正文");
@@ -131,18 +154,18 @@ class PostModerationTest {
 
     @Test
     void recommendationKeepsGameAndSectionFilters() {
-        PostServiceImpl service = spy(new PostServiceImpl(mock(BoardMapper.class), mock(GameMapper.class),
+        PostServiceImpl service = spy(new PostServiceImpl(policyService(), mock(BoardMapper.class), mock(GameMapper.class),
                 mock(UserMapper.class), mock(UserFollowMapper.class), mock(HtmlSanitizer.class),
-                mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class)));
-        doReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<Post>(1, 10))
-                .when(service).page(any(com.baomidou.mybatisplus.core.metadata.IPage.class), any(Wrapper.class));
-        var request = new com.xiaoyang.d_game.dto.PostQueryReq();
+                mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class), mentions()));
+        doReturn(new Page<Post>(1, 10))
+                .when(service).page(any(IPage.class), any(Wrapper.class));
+        var request = new PostQueryReq();
         request.setGameId(100L);
         request.setBoardId(2L);
         request.setRecommended(true);
         service.pagePosts(request);
         var wrapper = ArgumentCaptor.forClass(Wrapper.class);
-        verify(service).page(any(com.baomidou.mybatisplus.core.metadata.IPage.class), wrapper.capture());
+        verify(service).page(any(IPage.class), wrapper.capture());
         String sql = wrapper.getValue().getSqlSegment();
         assertTrue(sql.contains("game_id"));
         assertTrue(sql.contains("board_id"));
@@ -152,18 +175,18 @@ class PostModerationTest {
 
     @Test
     void replySortingKeepsScopeAndExcludesHiddenComments() {
-        PostServiceImpl service = spy(new PostServiceImpl(mock(BoardMapper.class), mock(GameMapper.class),
+        PostServiceImpl service = spy(new PostServiceImpl(policyService(), mock(BoardMapper.class), mock(GameMapper.class),
                 mock(UserMapper.class), mock(UserFollowMapper.class), mock(HtmlSanitizer.class),
-                mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class)));
-        doReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<Post>(1, 10))
-                .when(service).page(any(com.baomidou.mybatisplus.core.metadata.IPage.class), any(Wrapper.class));
-        var request = new com.xiaoyang.d_game.dto.PostQueryReq();
+                mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class), mentions()));
+        doReturn(new Page<Post>(1, 10))
+                .when(service).page(any(IPage.class), any(Wrapper.class));
+        var request = new PostQueryReq();
         request.setGameId(100L);
         request.setBoardId(2L);
         request.setSort("LATEST_REPLY");
         service.pagePosts(request);
         var wrapper = ArgumentCaptor.forClass(Wrapper.class);
-        verify(service).page(any(com.baomidou.mybatisplus.core.metadata.IPage.class), wrapper.capture());
+        verify(service).page(any(IPage.class), wrapper.capture());
         String sql = wrapper.getValue().getSqlSegment();
         assertTrue(sql.contains("game_id"));
         assertTrue(sql.contains("board_id"));
@@ -177,11 +200,11 @@ class PostModerationTest {
     void ordinaryUserCannotPublishOfficialPost() {
         BoardMapper boards = mock(BoardMapper.class);
         Board official = new Board();
-        official.setName("官方");
+        official.setName("官方"); official.setPublishPolicy("ADMIN");
         when(boards.selectById(1L)).thenReturn(official);
-        PostServiceImpl service = spy(new PostServiceImpl(boards, mock(GameMapper.class), mock(UserMapper.class),
+        PostServiceImpl service = spy(new PostServiceImpl(policyService(), boards, mock(GameMapper.class), mock(UserMapper.class),
                 mock(UserFollowMapper.class), mock(HtmlSanitizer.class), mock(PostTopicMapper.class),
-                mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class)));
+                mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class), mentions()));
         PostCreateReq request = new PostCreateReq();
         request.setBoardId(1L);
         request.setTitle("冒充官方");
@@ -196,8 +219,8 @@ class PostModerationTest {
         when(boards.selectById(1L)).thenReturn(new Board());
         HtmlSanitizer sanitizer = mock(HtmlSanitizer.class);
         when(sanitizer.sanitizePostContent(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
-        PostServiceImpl service = spy(new PostServiceImpl(boards, mock(GameMapper.class), mock(UserMapper.class),
-                mock(UserFollowMapper.class), sanitizer, mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class)));
+        PostServiceImpl service = spy(new PostServiceImpl(policyService(), boards, mock(GameMapper.class), mock(UserMapper.class),
+                mock(UserFollowMapper.class), sanitizer, mock(PostTopicMapper.class), mock(PostTopicRelMapper.class), mock(PostCollectionMapper.class), mentions()));
         doReturn(true).when(service).save(any(Post.class));
         PostCreateReq request = new PostCreateReq();
         request.setBoardId(1L);

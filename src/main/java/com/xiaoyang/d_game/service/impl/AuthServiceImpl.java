@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.xiaoyang.d_game.common.BizException;
 import com.xiaoyang.d_game.common.ResultCode;
 import com.xiaoyang.d_game.config.JwtProperties;
+import com.xiaoyang.d_game.dto.EmailAuthReq;
+import com.xiaoyang.d_game.dto.EmailAuthReq.Purpose;
 import com.xiaoyang.d_game.dto.LoginReq;
 import com.xiaoyang.d_game.dto.RefreshTokenReq;
 import com.xiaoyang.d_game.dto.RegisterReq;
@@ -11,7 +13,9 @@ import com.xiaoyang.d_game.dto.TokenResp;
 import com.xiaoyang.d_game.entity.SysRole;
 import com.xiaoyang.d_game.entity.User;
 import com.xiaoyang.d_game.entity.UserRoleRel;
+import com.xiaoyang.d_game.manager.EmailCodeManager;
 import com.xiaoyang.d_game.mapper.SysRoleMapper;
+import com.xiaoyang.d_game.mapper.UserMapper;
 import com.xiaoyang.d_game.mapper.UserRoleRelMapper;
 import com.xiaoyang.d_game.security.JwtUtil;
 import com.xiaoyang.d_game.security.TokenRevocationService;
@@ -19,20 +23,17 @@ import com.xiaoyang.d_game.service.AuthService;
 import com.xiaoyang.d_game.service.UserService;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.UUID;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import com.xiaoyang.d_game.dto.EmailAuthReq;
-import com.xiaoyang.d_game.dto.EmailAuthReq.Purpose;
-import com.xiaoyang.d_game.manager.EmailCodeManager;
-import com.xiaoyang.d_game.mapper.UserMapper;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.dao.DuplicateKeyException;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -46,8 +47,8 @@ public class AuthServiceImpl implements AuthService {
 
     /** 新注册用户默认绑定的普通用户角色编码。 */
     private static final String ROLE_USER = "USER";
-    private static final org.springframework.data.redis.core.script.DefaultRedisScript<Long> MIGRATION_ATTEMPT =
-            new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+    private static final DefaultRedisScript<Long> MIGRATION_ATTEMPT =
+            new DefaultRedisScript<>(
                     "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],600) end; return n", Long.class);
 
     private final UserService userService;

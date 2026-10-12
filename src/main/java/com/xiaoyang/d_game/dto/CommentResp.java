@@ -3,12 +3,14 @@ package com.xiaoyang.d_game.dto;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 /**
  * 评论响应。
  */
 public class CommentResp {
+    private List<MessageDtos.Mention> mentions = List.of();
 
     /** 评论 ID。 */
     private Long id;

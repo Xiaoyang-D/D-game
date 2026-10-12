@@ -1,16 +1,23 @@
 package com.xiaoyang.d_game.service.impl;
 
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.xiaoyang.d_game.entity.User;
 import com.xiaoyang.d_game.entity.UserFollow;
 import com.xiaoyang.d_game.mapper.*;
+import com.xiaoyang.d_game.messaging.RealtimeGateway;
 import com.xiaoyang.d_game.security.CurrentUserPrincipal;
+import com.xiaoyang.d_game.service.MentionService;
 import com.xiaoyang.d_game.service.NotificationService;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.*;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+
 import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -21,8 +28,8 @@ class FollowRecoveryTest {
 
     @BeforeEach
     void setup() {
-        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
-                new org.apache.ibatis.builder.MapperBuilderAssistant(new org.apache.ibatis.session.Configuration(), "follow-test"), User.class);
+        TableInfoHelper.initTableInfo(
+                new MapperBuilderAssistant(new Configuration(), "follow-test"), User.class);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new CurrentUserPrincipal(1L, "follower"), null, List.of()));
         follows = mock(UserFollowMapper.class);
@@ -32,7 +39,8 @@ class FollowRecoveryTest {
         when(users.selectById(2L)).thenReturn(new User());
         service = new InteractServiceImpl(mock(CommentMapper.class), mock(PostMapper.class), users,
                 mock(UserLikeMapper.class), mock(UserFavoriteMapper.class), follows, notifications,
-                mock(StringRedisTemplate.class));
+                mock(MentionService.class),
+                mock(RealtimeGateway.class), mock(StringRedisTemplate.class));
     }
 
     @AfterEach

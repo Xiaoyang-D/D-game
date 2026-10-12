@@ -4,22 +4,26 @@ import com.xiaoyang.d_game.common.ResultCode;
 import com.xiaoyang.d_game.config.EmailAuthProperties;
 import com.xiaoyang.d_game.dto.EmailAuthReq.Purpose;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 import org.springframework.util.DigestUtils;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
+
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 /** 验证码与限流适配；Redis 不可用时失败关闭。 */
-@lombok.extern.slf4j.Slf4j
+@Slf4j
 @Component @RequiredArgsConstructor
 public class EmailCodeManager {
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -46,7 +50,7 @@ public class EmailCodeManager {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.GeneralSecurityException exception) {
+        } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("无法计算验证码摘要", exception);
         }
     }
@@ -68,6 +72,7 @@ public class EmailCodeManager {
                     digest(codeKey + ":" + code), String.valueOf(properties.getCodeTtlSeconds()));
             if (!Long.valueOf(1).equals(published)) { throw new IllegalStateException("发信占用已过期"); }
         } catch (RuntimeException exception) {
+            // 邮件异常可能携带接收邮箱或 SMTP 信息，避免将异常消息和堆栈写入日志。
             log.warn("认证邮件发送失败，异常类型={}", exception.getClass().getSimpleName());
             redis.execute(RELEASE, keys, reservation);
             throw new BizException(ResultCode.INTERNAL_ERROR, "邮件发送失败，请稍后重试");
